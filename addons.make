@@ -1,0 +1,6 @@
+ofxGui
+ofxOpenCv
+ofxOsc
+ofxThreadedImageLoader
+ofxVectorGraphics
+ofxJSON

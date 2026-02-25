@@ -1,0 +1,5 @@
+bin/Decomposer_Dist.zip
+bin/Decomposer.app
+bin/Decomposer_debug.app
+build
+build/*

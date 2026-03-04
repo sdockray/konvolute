@@ -72,6 +72,9 @@ AppCommand InputManager::getCommandForKey(int key) {
 	case 'p':
 	case 'P':
 		return CMD_TOGGLE_FULLSCREEN_PROJECTOR;
+	case 'i':
+	case 'I':
+		return CMD_TOGGLE_TITLE;
 	default:
 		return CMD_NONE;
 	}

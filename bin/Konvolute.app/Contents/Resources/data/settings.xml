@@ -9,12 +9,14 @@
 	<Active_Point_Color>255, 255, 255, 255</Active_Point_Color>
 	<Text_Color>255, 255, 255, 255</Text_Color>
 	<Active_Text_Color>0, 255, 0, 255</Active_Text_Color>
-	<Point_Size>2.98</Point_Size>
+	<Point_Size>7.93</Point_Size>
 	<Sel_Point_Size>1</Sel_Point_Size>
 	<Hover_Point_Size>2.755</Hover_Point_Size>
-	<Font_Size>11.4</Font_Size>
+	<Font_Size>9</Font_Size>
 	<Active_Font_Size>29.2</Active_Font_Size>
-	<Playhead_Size>17.915</Playhead_Size>
+	<Playhead_Size>2.99</Playhead_Size>
 	<Playhead_Color>244, 151, 255, 255</Playhead_Color>
-	<Video_Fade_Speed>7.35</Video_Fade_Speed>
+	<Video_Fade_Speed>14.97</Video_Fade_Speed>
+	<Title_Color>255, 249, 242, 255</Title_Color>
+	<Title_Font_Size>53.58</Title_Font_Size>
 </Visual_Settings>

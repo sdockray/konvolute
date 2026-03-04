@@ -30,6 +30,7 @@ public:
 	void gotMessage(ofMessage msg);
 
 	// Dual Window Support
+	shared_ptr<ofAppBaseWindow> mainWindow;
 	shared_ptr<ofAppBaseWindow> projectorWindow;
 	void drawProjector(ofEventArgs & args);
 	void drawVisuals(); // Core drawing logic shared by both windows
@@ -93,6 +94,8 @@ public:
 	float videoFadeSpeed;
 	bool showVideo;
 	bool showText;
+	bool showTitle;
+	string compositionTitle;
 	bool showGui;
 	bool showDebug;
 	bool showHelp;
@@ -112,12 +115,14 @@ public:
 	ofParameter<ofColor> activePointColor;
 	ofParameter<ofColor> textColor;
 	ofParameter<ofColor> activeTextColor;
+	ofParameter<ofColor> titleColor;
 
 	ofParameter<float> pointSize;
 	ofParameter<float> selectedPointSize;
 	ofParameter<float> hoveredPointSize;
 	ofParameter<float> fontSize;
 	ofParameter<float> activeFontSize;
+	ofParameter<float> titleFontSize;
 	ofParameter<float> playheadSize;
 	ofParameter<ofColor> playheadColor;
 	ofParameter<int> videoFitMode; // 0=stretch 1=fit-height 2=fit-width
@@ -126,13 +131,15 @@ public:
 	// Fonts
 	ofTrueTypeFont font;
 	ofTrueTypeFont activeFont;
+	ofTrueTypeFont titleFont;
 
 	// Helpers
 	ofVec2f screenToWorld(float x, float y);
-	void loadPoints(string jsonPath);
+	bool loadPoints(string jsonPath);
 	void sendOscMessage(string num, float val);
 	void triggerVideo(const DataPoint & p);
 	void sendFullUIUpdate(std::shared_ptr<PathObject> p);
+	void stopPathSamples(std::shared_ptr<PathObject> p);
 	std::shared_ptr<PathObject> createWanderingPath(const DataPoint & start,
 		int maxPoints, float randomness, int numNeighbors);
 

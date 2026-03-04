@@ -11,16 +11,9 @@ int main() {
 	settings.resizable = true;
 	shared_ptr<ofAppBaseWindow> mainWindow = ofCreateWindow(settings);
 
-	// 2. Setup Projector Window (Secondary Display)
-	settings.setSize(1024, 768);
-	settings.setPosition(ofVec2f(1500, 100)); // Default offset
-	settings.resizable = true;
-	settings.shareContextWith = mainWindow; // Key for shared GPU resources!
-	shared_ptr<ofAppBaseWindow> projectorWindow = ofCreateWindow(settings);
-
-	// 3. Initialize App and bind windows
+	// 2. Initialize App and bind main window
 	shared_ptr<ofApp> mainApp(new ofApp());
-	mainApp->projectorWindow = projectorWindow; // Give app a ref to the second window
+	mainApp->mainWindow = mainWindow; // Give app a ref to the main window for context sharing
 
 	ofRunApp(mainWindow, mainApp);
 	ofRunMainLoop();

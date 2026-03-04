@@ -1,4 +1,5 @@
 #include "ofApp.h"
+#include "ofAppGLFWWindow.h"
 #include "ofxJSON.h"
 
 // Natural Sort Helper
@@ -70,6 +71,8 @@ void ofApp::setup() {
 	isDraggingPath = false;
 	showVideo = false;
 	showText = false;
+	showTitle = false;
+	compositionTitle = "";
 	showGui = false;
 	showHelp = false;
 	lastVideoSwitchTime = 0;
@@ -91,12 +94,14 @@ void ofApp::setup() {
 	params.add(activePointColor.set("Active Point Color", ofColor(255, 255, 255), ofColor(0, 0), ofColor(255, 255)));
 	params.add(textColor.set("Text Color", ofColor(255), ofColor(0, 0), ofColor(255, 255)));
 	params.add(activeTextColor.set("Active Text Color", ofColor(0, 255, 0), ofColor(0, 0), ofColor(255, 255)));
+	params.add(titleColor.set("Title Color", ofColor(255, 255, 255), ofColor(0, 0), ofColor(255, 255)));
 
 	params.add(pointSize.set("Point Size", 5.0f, 1.0f, 100.0f)); // Increased default to 5.0
 	params.add(selectedPointSize.set("Sel Point Size", 8.0f, 1.0f, 30.0f));
 	params.add(hoveredPointSize.set("Hover Point Size", 16.0f, 1.0f, 40.0f));
 	params.add(fontSize.set("Font Size", 14.0f, 8.0f, 48.0f));
 	params.add(activeFontSize.set("Active Font Size", 14.0f, 8.0f, 48.0f));
+	params.add(titleFontSize.set("Title Font Size", 48.0f, 12.0f, 120.0f));
 	params.add(playheadSize.set("Playhead Size", 5.0f, 1.0f, 200.0f));
 	params.add(playheadColor.set("Playhead Color", ofColor(255), ofColor(0, 0), ofColor(255, 255)));
 	params.add(videoFitMode.set("Video Fit 0=stretch 1=height 2=width", 0, 0, 2));
@@ -111,6 +116,9 @@ void ofApp::setup() {
 
 	bool activeFontLoaded = activeFont.load("verdana.ttf", activeFontSize);
 	if (!activeFontLoaded) activeFontLoaded = activeFont.load(OF_TTF_SANS, activeFontSize);
+
+	bool titleFontLoaded = titleFont.load("verdana.ttf", titleFontSize);
+	if (!titleFontLoaded) titleFontLoaded = titleFont.load(OF_TTF_SANS, titleFontSize);
 
 	// Load default data
 	// In a real app we'd use a file dialog or settings file
@@ -144,15 +152,10 @@ void ofApp::update() {
 		}
 
 		if (addr == "/o_playPause") {
-			// Processing: active = msg.get(0).intValue();
-			// But Processing logic calls togglePlayback(). logic in oscEvent:
-			// if (msg.addrPattern().indexOf("/o_playPause")==0) { pathToUse.togglePlayback(); }
-			// Wait, the message sends 1 or 0?
-			// Processing sendOSCPlayPauseUpdate sends active ? 1 : 0.
-			// oscEvent logic ignores the argument and just calls togglePlayback().
-			// Let's match logic: toggle.
 			pathToUse->isActive = !pathToUse->isActive;
-			// Send feedback? Processing does NOT send feedback inside oscEvent to avoid loops,
+			if (!pathToUse->isActive) {
+				stopPathSamples(pathToUse);
+			}
 			oscManager.sendUIPathUpdate(pathToUse->id, pathToUse->isActive, pathToUse->radius, pathToUse->direction, pathToUse->sampleNum, pathToUse->volume, pathToUse->falloff, pathToUse->speed, pathToUse->mode);
 
 		} else if (addr == "/o_path") {
@@ -946,6 +949,42 @@ void ofApp::drawVisuals() {
 		}
 	}
 
+	// Draw Title (Screen Space)
+	if (showTitle && !compositionTitle.empty()) {
+		ofSetColor(titleColor);
+		if (titleFont.isLoaded()) {
+			// Update font size if changed
+			static float lastTitleFontSize = titleFontSize;
+			if (abs(lastTitleFontSize - titleFontSize) > 0.5f) {
+				bool result = titleFont.load("Futura.ttc", titleFontSize);
+				if (!result) result = titleFont.load("verdana.ttf", titleFontSize);
+				if (!result) titleFont.load(OF_TTF_SANS, titleFontSize);
+				lastTitleFontSize = titleFontSize;
+			}
+
+			ofRectangle bounds = titleFont.getStringBoundingBox(compositionTitle, 0, 0);
+			float x = (ofGetWidth() - bounds.width) / 2.0f;
+			float y = (ofGetHeight() - bounds.height) / 2.0f + bounds.height;
+
+			// Optional drop shadow
+			ofSetColor(0, 0, 0, 150);
+			titleFont.drawString(compositionTitle, x + 2, y + 2);
+			ofSetColor(titleColor);
+
+			titleFont.drawString(compositionTitle, x, y);
+		} else {
+			float strWidth = compositionTitle.length() * 8.0f;
+			float x = (ofGetWidth() - strWidth) / 2.0f;
+			float y = ofGetHeight() / 2.0f;
+
+			ofSetColor(0, 0, 0, 150);
+			ofDrawBitmapString(compositionTitle, x + 2, y + 2);
+			ofSetColor(titleColor);
+
+			ofDrawBitmapString(compositionTitle, x, y);
+		}
+	}
+
 	// Draw Mouse Scrubbing Feedback
 	if (currentMode == NAVIGATE && !mouseActivePoints.empty()) {
 		ofPushMatrix();
@@ -1051,9 +1090,11 @@ void ofApp::drawVisuals() {
 		ly += lineH;
 		ofDrawBitmapString("  Up/Dn Adjust speed", lx, ly);
 		ly += lineH;
-		ofDrawBitmapString("  r / R Increase / decrease radius", lx, ly);
+		ofDrawBitmapString("  + / - Increase / decrease sample layer count", lx, ly);
 		ly += lineH;
-		ofDrawBitmapString("  v / V Increase / decrease volume", lx, ly);
+		ofDrawBitmapString("  r / R Increase / decrease catchment radius", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  v / V Increase / decrease playback volume", lx, ly);
 		ly += lineH * 2;
 		ofDrawBitmapString("--- Scrub & Gesture ---", lx, ly);
 		ly += lineH;
@@ -1077,6 +1118,8 @@ void ofApp::drawVisuals() {
 		ly += lineH;
 		ofDrawBitmapString("  ,     Toggle settings panel", lx, ly);
 		ly += lineH * 2;
+		ofDrawBitmapString("  p     Toggle secondary projector fullscreen Window", lx, ly);
+		ly += lineH * 2;
 		ofDrawBitmapString("--- Paths ---", lx, ly);
 		ly += lineH;
 		ofDrawBitmapString("  c     Deselect path", lx, ly);
@@ -1087,9 +1130,9 @@ void ofApp::drawVisuals() {
 		ly += lineH;
 		ofDrawBitmapString("  k     Refresh path", lx, ly);
 		ly += lineH;
-		ofDrawBitmapString("  s     Save path", lx, ly);
+		ofDrawBitmapString("  s     Save current Composition to JSON", lx, ly);
 		ly += lineH;
-		ofDrawBitmapString("  o     Load points from JSON", lx, ly);
+		ofDrawBitmapString("  o     Load Points or Composition from JSON", lx, ly);
 		ly += lineH * 2;
 		ofDrawBitmapString("Press H to close", lx, ly);
 		ofDisableBlendMode();
@@ -1139,6 +1182,9 @@ void ofApp::keyPressed(int key) {
 	case CMD_TOGGLE_PLAYBACK: // Spacebar
 		if (selectedPath) {
 			selectedPath->togglePlayback();
+			if (!selectedPath->isActive) {
+				stopPathSamples(selectedPath);
+			}
 		}
 		break;
 
@@ -1152,6 +1198,10 @@ void ofApp::keyPressed(int key) {
 
 	case CMD_SAVE_COMPOSITION: // 's'
 	{
+		string newTitle = ofSystemTextBoxDialog("Enter Composition Title", compositionTitle);
+		// If user cancels, it might return empty or the original. We will assume if they entered something we use it.
+		// Actually, ofSystemTextBoxDialog returns the entered string, or empty if cancelled/empty.
+		compositionTitle = newTitle;
 		ofFileDialogResult result = ofSystemSaveDialog("composition.json", "Save Composition As");
 		if (result.bSuccess) {
 			saveComposition(result.getPath());
@@ -1167,12 +1217,36 @@ void ofApp::keyPressed(int key) {
 
 	case CMD_TOGGLE_FULLSCREEN_PROJECTOR:
 		if (projectorWindow) {
-			projectorWindow->toggleFullscreen();
+			// Check if the window is actually still open and valid
+			auto glfwWin = std::dynamic_pointer_cast<ofAppGLFWWindow>(projectorWindow);
+			if (glfwWin && glfwWin->getGLFWWindow() != nullptr && !glfwWin->getWindowShouldClose()) {
+				projectorWindow->toggleFullscreen();
+			} else {
+				// Window was closed by the user, clean up the pointer and recreate it
+				ofRemoveListener(projectorWindow->events().draw, this, &ofApp::drawProjector);
+				projectorWindow.reset();
+			}
+		}
+
+		if (!projectorWindow) {
+			// Create the projector window dynamically
+			ofGLFWWindowSettings settings;
+			settings.setSize(1024, 768);
+			settings.setPosition(ofVec2f(1500, 100)); // Default offset for secondary display
+			settings.resizable = true;
+			settings.shareContextWith = mainWindow;
+
+			projectorWindow = ofCreateWindow(settings);
+			ofAddListener(projectorWindow->events().draw, this, &ofApp::drawProjector);
 		}
 		break;
 
 	case CMD_TOGGLE_TEXT:
 		showText = !showText;
+		break;
+
+	case CMD_TOGGLE_TITLE:
+		showTitle = !showTitle;
 		break;
 
 	case CMD_TOGGLE_SETTINGS:
@@ -1230,9 +1304,7 @@ void ofApp::keyPressed(int key) {
 	case CMD_DELETE_PATH:
 		if (selectedPath) {
 			// Stop playing samples
-			for (const auto & p : selectedPath->playingPoints) {
-				oscManager.stopSample(mediaRoot + p.filename, selectedPath->name);
-			}
+			stopPathSamples(selectedPath);
 
 			// Send OSC Removal
 			oscManager.sendPathRemove(selectedPath->name);
@@ -1746,14 +1818,25 @@ ofVec2f ofApp::screenToWorld(float x, float y) {
 }
 
 //--------------------------------------------------------------
-void ofApp::loadPoints(string jsonPath) {
+bool ofApp::loadPoints(string jsonPath) {
+	// Keep track of the currently loaded file for saving compositions
+	lastLoadedPointsPath = jsonPath;
+
+	// Reset state and clear UI / Synths
+	paths.clear();
+	selectedPath = nullptr;
+	oscManager.sendReset(); // Notify SuperCollider of standard reset
+	oscManager.sendClear();
+
 	ofxJSONElement json;
 	if (json.open(jsonPath)) {
-		lastLoadedPointsPath = jsonPath;
+		if (!json.isArray()) {
+			ofLogError("ofApp::loadPoints") << "Error: Expected JSON array of points, but got an object. Did you select a composition file?";
+			ofSystemAlertDialog("The selected file is not a valid points file.\nPlease ensure you select the raw points JSON and not a composition file.");
+			return false;
+		}
+
 		points.clear();
-		paths.clear();
-		selectedPath = nullptr;
-		oscManager.sendClear();
 
 		ofLogNotice("ofApp::loadPoints") << "Loading points from " << jsonPath;
 
@@ -1837,8 +1920,10 @@ void ofApp::loadPoints(string jsonPath) {
 		// Rebuild grid
 		spatialGrid = std::make_shared<SpatialGrid>(points, 50.0f / zoom); // Adjust grid cell size based on zoom? Or keep world units?
 		// SpatialGrid uses world units. 50.0f is arbitrary. Let's keep it 50 or adapt to density.
+		return true;
 	} else {
 		ofLogError("ofApp::loadPoints") << "Failed to open JSON file: " << jsonPath;
+		return false;
 	}
 }
 
@@ -1962,11 +2047,23 @@ std::shared_ptr<PathObject> ofApp::createWanderingPath(
 }
 
 //--------------------------------------------------------------
+void ofApp::stopPathSamples(std::shared_ptr<PathObject> p) {
+	if (!p) return;
+	for (const auto & dp : p->playingPoints) {
+		oscManager.stopSample(mediaRoot + dp.filename, p->name);
+	}
+	p->playingPoints.clear();
+}
+
+//--------------------------------------------------------------
 void ofApp::saveComposition(string filepath) {
 	ofxJSONElement root;
 
 	// 1. Data Source
 	root["points_file"] = lastLoadedPointsPath;
+
+	// Title
+	root["title"] = compositionTitle;
 
 	// 2. Settings / Camera
 	root["settings"]["zoom"] = zoom;
@@ -2039,12 +2136,40 @@ void ofApp::loadCompositionOrPoints(string filepath) {
 
 		// 1. Load the underlying data points
 		string targetPointsFile = root["points_file"].asString();
-		loadPoints(targetPointsFile);
+
+		if (!ofFile(targetPointsFile).exists()) {
+			ofSystemAlertDialog("The points file could not be found:\n" + targetPointsFile + "\n\nPlease locate it now to repair the composition.");
+			ofFileDialogResult result = ofSystemLoadDialog("Locate " + ofFilePath::getFileName(targetPointsFile));
+			if (result.bSuccess) {
+				targetPointsFile = result.getPath();
+				root["points_file"] = targetPointsFile;
+				// Rewrite the composition file with the new path
+				root.save(filepath, true);
+				ofLogNotice("ofApp::loadCompositionOrPoints") << "Repaired composition with new points file: " << targetPointsFile;
+			} else {
+				ofLogError("ofApp::loadCompositionOrPoints") << "Repair cancelled. Cannot load composition.";
+				return;
+			}
+		}
+
+		if (!loadPoints(targetPointsFile)) {
+			// If loadPoints fails (e.g. wrong file type), abort composition load
+			ofLogError("ofApp::loadCompositionOrPoints") << "Failed to load points data. Aborting composition load.";
+			return;
+		}
+
+		// Load title
+		if (root.isMember("title")) {
+			compositionTitle = root["title"].asString();
+			showTitle = true; // Auto-show if loaded? (Can keep it optional, let's auto-show if it exists and is not empty)
+			if (compositionTitle.empty()) showTitle = false;
+		}
 
 		// 2. Clear existing paths and selection
 		paths.clear();
 		selectedPath = nullptr;
-		oscManager.sendClear();
+		oscManager.sendReset(); // Notify SuperCollider of standard reset
+		oscManager.sendClear(); // Tell UI/SC to clear visuals/synths
 
 		// 3. Restore settings
 		if (root.isMember("settings")) {

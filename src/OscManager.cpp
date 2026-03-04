@@ -126,6 +126,12 @@ void OscManager::sendClear() {
 	sender.sendMessage(m);
 }
 
+void OscManager::sendReset() {
+	ofxOscMessage m;
+	m.setAddress("/reset");
+	sender.sendMessage(m);
+}
+
 void OscManager::sendPathRemoveEffect(const std::string & pathName, const std::string & effect) {
 	ofxOscMessage m;
 	m.setAddress("/removeeffect");

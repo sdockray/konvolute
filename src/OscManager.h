@@ -28,6 +28,7 @@ public:
 	void sendPathRemove(const std::string & pathName); // Tell SC to free synth
 	void sendPathRemoveEffect(const std::string & pathName, const std::string & effect);
 	void sendClear();
+	void sendReset();
 
 	// Pulser
 	void sendUpdatePulser(const std::string & pathName, float mix,

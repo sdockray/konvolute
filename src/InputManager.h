@@ -29,7 +29,8 @@ enum AppCommand {
 	CMD_CLEAR_GESTURE, // 'g'
 	CMD_TOGGLE_STEP_MODE, // 'e'
 	CMD_TOGGLE_HELP, // 'h'
-	CMD_TOGGLE_FULLSCREEN_PROJECTOR // 'p'
+	CMD_TOGGLE_FULLSCREEN_PROJECTOR, // 'p'
+	CMD_TOGGLE_TITLE // 'i'
 };
 
 class InputManager {

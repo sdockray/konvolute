@@ -111,6 +111,10 @@ public:
 	string mediaRoot;
 	string lastAttemptedVideoPath;
 
+	// Loop gap hiding
+	float videoLastPos = 0.0f;
+	int videoIgnoreFrames = 0;
+
 	// Grid Mode State
 	const int GRID_COLS = 4;
 	const int GRID_ROWS = 3;

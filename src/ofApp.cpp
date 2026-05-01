@@ -700,6 +700,20 @@ void ofApp::update() {
 		if (videoDisplayMode.get() == 0) {
 			videoFront->update();
 			videoBack->update();
+			
+			// Detect loop to hide gap
+			float currentPos = videoFront->getPosition();
+			if (currentPos < 0.1f && videoLastPos > 0.8f) {
+				// We just looped (either naturally or manually)
+				videoIgnoreFrames = 4; // hide video for 4 frames to let hold buffer show
+			}
+			videoLastPos = currentPos;
+
+			// Hack for AVFoundation loop gap: manually restart video before it hits the absolute end
+			// This prevents it from outputting a black frame during its native loop cycle
+			if (videoFront->isPlaying() && currentPos > 0.98f) {
+				videoFront->setPosition(0.0f);
+			}
 			// Sync fade speed from GUI param
 			videoFadeSpeed = videoFadeSpeed_param.get();
 			// Advance crossfade alpha toward target
@@ -708,10 +722,13 @@ void ofApp::update() {
 			else if (videoAlpha > videoAlphaTarget)
 				videoAlpha = std::max(videoAlpha - videoFadeSpeed, videoAlphaTarget);
 
-			// Capture the front player's current frame to the hold FBO.
-			// Only fires when a genuinely new frame has been decoded — never captures
-			// a loading artefact or black frame.
-			if (videoFront->isFrameNew() && videoFront->getWidth() > 0) {
+			if (videoIgnoreFrames > 0) {
+				videoIgnoreFrames--;
+			}
+
+			// Captures the front player's current frame to the hold FBO.
+			// Only fires when a genuinely new frame has been decoded AND the clip is fully faded in AND we aren't hiding a loop gap.
+			if (videoFront->isFrameNew() && videoFront->getWidth() > 0 && videoAlpha >= 255.0f && videoIgnoreFrames == 0) {
 				// Lazily allocate here so window size is definitely known
 				if (!videoHoldAllocated) {
 					videoHoldFbo.allocate(ofGetWidth(), ofGetHeight(), GL_RGB);
@@ -801,16 +818,17 @@ void ofApp::drawVisuals() {
 			if (videoHoldAllocated) {
 				// Paint the last-captured frame as a persistent background.
 				// This is always opaque — covers any gap/flicker from the live player.
+				ofBackground(backgroundColor);
 				ofSetColor(255, 255, 255, 255);
-				videoHoldFbo.draw(0, 0);
+				videoHoldFbo.draw(0, 0, ofGetWidth(), ofGetHeight());
 			} else {
 				ofBackground(backgroundColor); // before first frame is ever captured
 			}
 
 			// Draw the live front player on top as it fades in (0 → 255 on clip switch).
-			// When alpha reaches 255 it fully covers the held background; the FBO then
-			// captures this live frame on the next update, keeping them in sync.
-			if (videoFront->isLoaded() && videoFront->getWidth() > 0) {
+			// If we are currently ignoring frames (to hide a loop gap), we just skip drawing it,
+			// letting the frozen `videoHoldFbo` seamlessly fill the gap!
+			if (videoFront->isLoaded() && videoFront->getWidth() > 0 && videoIgnoreFrames == 0) {
 				ofEnableBlendMode(OF_BLENDMODE_ALPHA);
 				ofSetColor(255, 255, 255, (int)std::clamp(videoAlpha, 0.0f, 255.0f));
 				float vw = videoFront->getWidth(), vh = videoFront->getHeight();

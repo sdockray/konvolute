@@ -112,6 +112,7 @@ void ofApp::setup() {
 	params.add(videoDisplayMode.set("Video Mode 0=default, 1=grid", 0, 0, 1));
 	params.add(videoFadeSpeed_param.set("Video Fade Speed", 15.0f, 1.0f, 60.0f));
 	params.add(cloudTransitionSpeed.set("Cloud Transition Speed", 0.05f, 0.01f, 1.0f));
+	params.add(neighbourSeqGapMs_param.set("Neighbour Seq Gap (ms)", 300.0f, 50.0f, 2000.0f));
 
 	// Initialize Grid mode layers
 	for (int i = 0; i < (GRID_COLS * GRID_ROWS); i++) {
@@ -451,6 +452,16 @@ void ofApp::update() {
 					hoveredPoint = nearestPoint;
 					hasHoveredPoint = true;
 
+					// Track selected point index for neighbour mode
+					if (neighbourModeActive) {
+						for (int pi = 0; pi < (int)points.size(); ++pi) {
+							if (points[pi].filename == nearestPoint.filename) {
+								selectedPointIdx = pi;
+								break;
+							}
+						}
+					}
+
 					// If different from last hovered
 					if (!hasLastHoveredPoint || !(hoveredPoint == lastHoveredPoint)) {
 						if (hasLastHoveredPoint) {
@@ -481,6 +492,32 @@ void ofApp::update() {
 				oscManager.stopSample(mediaRoot + lastHoveredPoint.filename, "path-0");
 				hasLastHoveredPoint = false;
 				hasHoveredPoint = false;
+			}
+		}
+	}
+
+	// Neighbour mode: tick sequential playback queue
+	neighbourSeqGapMs = neighbourSeqGapMs_param.get(); // sync from GUI
+	if (neighbourSeqPlaying && !neighbourQueue.empty()) {
+		uint64_t nowMs = ofGetElapsedTimeMillis();
+		if ((nowMs - neighbourSeqLastTriggerMs) >= (uint64_t)neighbourSeqGapMs) {
+			if (neighbourSeqIdx < (int)neighbourQueue.size()) {
+				int ptIdx = neighbourQueue[neighbourSeqIdx];
+				const DataPoint & np = points[ptIdx];
+				float vol = paths.empty() ? 0.5f : paths[0]->volume;
+				string mode = paths.empty() ? "once" : paths[0]->getMode();
+				oscManager.sendSample(mediaRoot + np.filename, "path-0", vol, mode);
+				// Trigger video if enabled
+				if (showVideo && !paths.empty() && paths[0]->sendToVideo) {
+					triggerVideo(np);
+				}
+				// Record for line illumination
+				neighbourLastPlayedIdx = ptIdx;
+				neighbourLastPlayedMs = nowMs;
+				neighbourSeqLastTriggerMs = nowMs;
+				++neighbourSeqIdx;
+			} else {
+				neighbourSeqPlaying = false; // Done
 			}
 		}
 	}
@@ -976,6 +1013,66 @@ void ofApp::drawVisuals() {
 		ofDrawCircle(p.x, p.y, (pointSize / zoom) * scale);
 	}
 
+	// --- Neighbour Mode Highlighting ---
+	if (neighbourModeActive && selectedPointIdx >= 0 && selectedPointIdx < (int)points.size()) {
+		const DataPoint & sel = points[selectedPointIdx];
+
+		// Compute neighbour weights once: weight 1.0 = nearest, 0.0 = furthest
+		const auto & neighbours = sel.true_neighbors;
+		const auto & distances = sel.true_distances;
+		int numNeighbours = (int)std::min(neighbours.size(), distances.size());
+
+		if (numNeighbours > 0) {
+			float minDist = *std::min_element(distances.begin(), distances.begin() + numNeighbours);
+			float maxDist = *std::max_element(distances.begin(), distances.begin() + numNeighbours);
+			float distRange = std::max(maxDist - minDist, 1e-6f);
+
+			uint64_t nowMs = ofGetElapsedTimeMillis();
+			uint64_t msSincePlayed = (neighbourLastPlayedIdx >= 0)
+				? (nowMs - neighbourLastPlayedMs) : kNeighbourFlashMs + 1;
+
+			ofNoFill();
+			ofSetLineWidth(1.5f);
+
+			for (int ni = 0; ni < numNeighbours; ++ni) {
+				int idx = neighbours[ni];
+				if (idx < 0 || idx >= (int)points.size()) continue;
+				const DataPoint & np = points[idx];
+
+				// Proximity weight: nearest=1.0, furthest=0.0
+				float weight = 1.0f - ((distances[ni] - minDist) / distRange);
+				weight = std::max(0.0f, std::min(1.0f, weight));
+
+				// Base alpha: 20% (dim) to 100% (nearest)
+				float baseAlpha = ofLerp(50.0f, 255.0f, weight);
+
+				// Flash: if this point was the last one played, overlay a bright flash
+				if (idx == neighbourLastPlayedIdx && msSincePlayed < kNeighbourFlashMs) {
+					float flashT = 1.0f - ((float)msSincePlayed / (float)kNeighbourFlashMs);
+					// Blend line from flash-white toward the distance-tinted colour
+					int flashAlpha = (int)ofLerp(baseAlpha, 255.0f, flashT);
+					ofSetColor(255, 255, 255, flashAlpha); // bright white flash
+				} else {
+					// Normal: cool blue-white, opacity = proximity
+					ofSetColor(180, 210, 255, (int)baseAlpha);
+				}
+
+				ofDrawLine(sel.x, sel.y, np.x, np.y);
+			}
+
+			ofFill();
+			ofSetLineWidth(1.0f);
+		}
+
+		// Draw selected point indicator: bright ring on top
+		ofSetColor(255, 255, 100, 230); // bright yellow
+		ofNoFill();
+		ofSetLineWidth(2.0f);
+		ofDrawCircle(sel.x, sel.y, (pointSize / zoom) * 2.5f);
+		ofFill();
+		ofSetLineWidth(1.0f);
+	}
+
 	// Draw Text
 	// Draw Paths
 	for (auto & path : paths) {
@@ -1212,8 +1309,15 @@ void ofApp::drawVisuals() {
 	}
 	ofDrawBitmapString("3D Dim: " + dimStr, 20, 80);
 	ofDrawBitmapString("Audio Mode: " + string(defaultPathMode == PathObject::LOOP_MODE ? "LOOP" : "ONCE"), 20, 100);
+	{
+		string nbStr = neighbourModeActive ? "ON" : "OFF";
+		if (neighbourModeActive && selectedPointIdx >= 0 && selectedPointIdx < (int)points.size()) {
+			nbStr += " | " + ofFilePath::getFileName(points[selectedPointIdx].filename);
+		}
+		ofDrawBitmapString("Neighbour Mode (N): " + nbStr, 20, 120);
+	}
 
-	int textY = 120;
+	int textY = 140;
 	if (selectedPath) {
 		ofDrawBitmapString("Selected: " + selectedPath->name + " - Video: " + (selectedPath->sendToVideo ? "ON" : "OFF"), 20, textY);
 		textY += 20;
@@ -1594,6 +1698,64 @@ void ofApp::keyPressed(int key) {
 	case CMD_CLUSTER_CLEAR:
 		activeClusterId = -999;
 		ofLogNotice("ofApp") << "Cluster filter cleared";
+		break;
+
+	case CMD_TOGGLE_NEIGHBOUR:
+		neighbourModeActive = !neighbourModeActive;
+		if (!neighbourModeActive) {
+			selectedPointIdx = -1;
+			neighbourSeqPlaying = false;
+			neighbourQueue.clear();
+			neighbourLastPlayedIdx = -1;
+			neighbourLastPlayedMs = 0;
+		}
+		ofLogNotice("ofApp") << "Neighbour mode: " << (neighbourModeActive ? "ON" : "OFF");
+		break;
+
+	case CMD_NEIGHBOUR_PLAY_SEQ:
+		if (!neighbourModeActive) {
+			// Fall through to title toggle when neighbour mode is off
+			showTitle = !showTitle;
+		} else if (selectedPointIdx >= 0 && selectedPointIdx < (int)points.size()) {
+			// Build queue sorted by ascending distance
+			const DataPoint & sel = points[selectedPointIdx];
+			int numN = (int)std::min(sel.true_neighbors.size(), sel.true_distances.size());
+			// Create index-distance pairs, sort by distance
+			std::vector<std::pair<float, int>> distIdx;
+			distIdx.reserve(numN);
+			for (int ni = 0; ni < numN; ++ni) {
+				distIdx.push_back({sel.true_distances[ni], sel.true_neighbors[ni]});
+			}
+			std::sort(distIdx.begin(), distIdx.end());
+			neighbourQueue.clear();
+			for (auto & di : distIdx) {
+				if (di.second >= 0 && di.second < (int)points.size()) {
+					neighbourQueue.push_back(di.second);
+				}
+			}
+			neighbourSeqIdx = 0;
+			neighbourSeqLastTriggerMs = 0; // Trigger immediately on first tick
+			neighbourSeqPlaying = true;
+			ofLogNotice("ofApp") << "Neighbour seq play: " << neighbourQueue.size() << " neighbours";
+		}
+		break;
+
+	case CMD_NEIGHBOUR_PLAY_ALL:
+		if (!neighbourModeActive) {
+			// No previous binding for u/U — do nothing
+		} else if (selectedPointIdx >= 0 && selectedPointIdx < (int)points.size()) {
+			const DataPoint & sel = points[selectedPointIdx];
+			float vol = paths.empty() ? 0.5f : paths[0]->volume;
+			string mode = paths.empty() ? "once" : paths[0]->getMode();
+			int numN = (int)std::min(sel.true_neighbors.size(), sel.true_distances.size());
+			for (int ni = 0; ni < numN; ++ni) {
+				int idx = sel.true_neighbors[ni];
+				if (idx >= 0 && idx < (int)points.size()) {
+					oscManager.sendSample(mediaRoot + points[idx].filename, "path-0", vol, mode);
+				}
+			}
+			ofLogNotice("ofApp") << "Neighbour play all: fired " << numN << " samples";
+		}
 		break;
 
 	case CMD_DECREASE_RADIUS: // 'R'

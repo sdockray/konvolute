@@ -10,8 +10,9 @@ AppCommand InputManager::getCommandForKey(int key) {
 
 	switch (key) {
 	case 'n':
-	case 'N':
 		return CMD_MODE_NAVIGATE;
+	case 'N':
+		return CMD_TOGGLE_NEIGHBOUR;
 	case 'f':
 	case 'F':
 		return CMD_MODE_DRAW;
@@ -79,9 +80,13 @@ AppCommand InputManager::getCommandForKey(int key) {
 	case 'p':
 	case 'P':
 		return CMD_TOGGLE_FULLSCREEN_PROJECTOR;
-	case 'i':
 	case 'I':
 		return CMD_TOGGLE_TITLE;
+	case 'i':
+		return CMD_NEIGHBOUR_PLAY_SEQ;
+	case 'u':
+	case 'U':
+		return CMD_NEIGHBOUR_PLAY_ALL;
 	case 'y':
 	case 'Y':
 		return CMD_TOGGLE_PINGPONG;

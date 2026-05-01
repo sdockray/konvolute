@@ -77,6 +77,21 @@ public:
 	int activeClusterId = -999; // Sentinel: no cluster filter active
 	std::vector<int> sortedClusterIds; // Cached sorted list of cluster ids for stepping
 
+	// Neighbour Mode
+	bool neighbourModeActive = false;
+	int selectedPointIdx = -1; // Index into points[] of the active/hovered point
+	// Sequential neighbour playback
+	bool neighbourSeqPlaying = false;
+	int neighbourSeqIdx = 0;
+	uint64_t neighbourSeqLastTriggerMs = 0;
+	float neighbourSeqGapMs = 300.0f; // configurable gap between triggers
+	// Sorted neighbour indices (by distance, nearest first) for the active point
+	std::vector<int> neighbourQueue; // point indices in play order
+	// Flash illumination: which neighbour point index was last triggered and when
+	int neighbourLastPlayedIdx = -1;     // index into points[]
+	uint64_t neighbourLastPlayedMs = 0;  // timestamp of last trigger (ms)
+	static constexpr uint64_t kNeighbourFlashMs = 400; // flash duration
+
 	// View
 	float zoom;
 	ofVec2f pan;
@@ -183,6 +198,7 @@ public:
 	ofParameter<float> macroblockThreshold;
 	ofParameter<float> datamoshDecay;
 	ofParameter<int> datamoshSearchRadius;
+	ofParameter<float> neighbourSeqGapMs_param; // gap between neighbour triggers (ms)
 
 	// Fonts
 	ofTrueTypeFont font;

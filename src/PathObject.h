@@ -56,6 +56,7 @@ public:
 	bool isSequential;
 	bool isWander;
 	std::vector<DataPoint> sequentialPoints;
+	std::vector<const DataPoint*> attachedPoints; // For live tracking of moving points
 	int currentStepIndex;
 	bool jitterMode; // Probabilistic step advance
 	int lastJitterStepFloor; // Position floor from last frame (detects step boundary crossings)

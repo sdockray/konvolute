@@ -15,6 +15,19 @@ enum DisplayMode {
 	GRID_MODE = 1
 };
 
+enum class PointCloudMode {
+	LOCAL,
+	MID,
+	GLOBAL
+};
+
+enum class ThirdDimMode {
+	NONE,
+	INSTABILITY,
+	ATTACK,
+	BRIGHTNESS
+};
+
 class ofApp : public ofBaseApp {
 
 public:
@@ -58,6 +71,11 @@ public:
 	bool bHoldingR = false;
 	bool bHoldingV = false;
 	int defaultPathMode = 3; // Starts at ONCE_MODE
+
+	PointCloudMode currentCloudMode = PointCloudMode::MID;
+	ThirdDimMode currentThirdDimMode = ThirdDimMode::NONE;
+	int activeClusterId = -999; // Sentinel: no cluster filter active
+	std::vector<int> sortedClusterIds; // Cached sorted list of cluster ids for stepping
 
 	// View
 	float zoom;
@@ -158,6 +176,7 @@ public:
 	ofParameter<ofColor> playheadColor;
 	ofParameter<int> videoFitMode; // 0=stretch 1=fit-height 2=fit-width
 	ofParameter<float> videoFadeSpeed_param; // crossfade speed (alpha/frame)
+	ofParameter<float> cloudTransitionSpeed; // transition speed between clouds
 
 	ofParameter<int> videoDisplayMode; // 0=default, 1=grid, 2=datamosh
 	ofParameter<int> macroblockSize;

@@ -111,6 +111,7 @@ void ofApp::setup() {
 	params.add(videoFitMode.set("Video Fit 0=stretch 1=height 2=width", 0, 0, 2));
 	params.add(videoDisplayMode.set("Video Mode 0=default, 1=grid", 0, 0, 1));
 	params.add(videoFadeSpeed_param.set("Video Fade Speed", 15.0f, 1.0f, 60.0f));
+	params.add(cloudTransitionSpeed.set("Cloud Transition Speed", 0.05f, 0.01f, 1.0f));
 
 	// Initialize Grid mode layers
 	for (int i = 0; i < (GRID_COLS * GRID_ROWS); i++) {
@@ -390,6 +391,37 @@ void ofApp::update() {
 				pathToUse->lastJitterStepFloor = -1;
 			}
 		}
+	}
+
+	// Cloud transition interpolation
+	bool pointsMoved = false;
+	for (auto & p : points) {
+		ofVec2f target;
+		switch (currentCloudMode) {
+		case PointCloudMode::LOCAL:
+			target = p.pos_local;
+			break;
+		case PointCloudMode::MID:
+			target = p.pos_mid;
+			break;
+		case PointCloudMode::GLOBAL:
+			target = p.pos_global;
+			break;
+		}
+
+		if (std::abs(p.x - target.x) > 0.001f || std::abs(p.y - target.y) > 0.001f) {
+			p.x = ofLerp(p.x, target.x, cloudTransitionSpeed.get());
+			p.y = ofLerp(p.y, target.y, cloudTransitionSpeed.get());
+			pointsMoved = true;
+		} else {
+			p.x = target.x;
+			p.y = target.y;
+		}
+	}
+
+	if (pointsMoved && spatialGrid && !points.empty()) {
+		// Rebuild the spatial grid because point positions have changed
+		spatialGrid = std::make_shared<SpatialGrid>(points, 50.0f / zoom);
 	}
 
 	// Navigate Mode Scrubbing
@@ -700,7 +732,7 @@ void ofApp::update() {
 		if (videoDisplayMode.get() == 0) {
 			videoFront->update();
 			videoBack->update();
-			
+
 			// Detect loop to hide gap
 			float currentPos = videoFront->getPosition();
 			if (currentPos < 0.1f && videoLastPos > 0.8f) {
@@ -908,14 +940,40 @@ void ofApp::drawVisuals() {
 	// Draw Points
 	ofFill(); // Ensure fill is enabled
 	ofColor c = pointColor.get();
+	float baseAlpha;
 	if (showText) {
-		ofSetColor(c.r, c.g, c.b, std::min((float)c.a, 25.0f)); // cap opacity so text is readable
+		baseAlpha = std::min((float)c.a, 25.0f); // cap opacity so text is readable
 	} else {
-		ofSetColor(c); // Use user opacity when not showing text
+		baseAlpha = (float)c.a;
 	}
 
 	for (const auto & p : points) {
-		ofDrawCircle(p.x, p.y, pointSize / zoom);
+		// Cluster foregrounding: dim non-active cluster points
+		float alpha = baseAlpha;
+		if (activeClusterId != -999 && p.cluster_id != activeClusterId) {
+			alpha = baseAlpha * 0.15f; // 15% of normal
+		}
+		ofSetColor(c.r, c.g, c.b, (int)alpha);
+
+		float scale = 1.0f;
+		if (currentThirdDimMode != ThirdDimMode::NONE) {
+			float val = 0.0f;
+			switch (currentThirdDimMode) {
+			case ThirdDimMode::INSTABILITY:
+				val = p.instability;
+				break;
+			case ThirdDimMode::ATTACK:
+				val = p.attack;
+				break;
+			case ThirdDimMode::BRIGHTNESS:
+				val = p.brightness;
+				break;
+			default:
+				break;
+			}
+			scale = ofLerp(0.2f, 2.0f, val);
+		}
+		ofDrawCircle(p.x, p.y, (pointSize / zoom) * scale);
 	}
 
 	// Draw Text
@@ -1057,6 +1115,31 @@ void ofApp::drawVisuals() {
 		}
 	}
 
+	// Draw active cluster label (screen-space, prominent)
+	if (activeClusterId != -999) {
+		std::string clusterLabel = "Cluster " + ofToString(activeClusterId);
+		if (clusters.count(activeClusterId) && !clusters[activeClusterId].label.empty()) {
+			clusterLabel = clusters[activeClusterId].label;
+		}
+		if (titleFont.isLoaded()) {
+			ofRectangle bounds = titleFont.getStringBoundingBox(clusterLabel, 0, 0);
+			float x = (ofGetWidth() - bounds.width) / 2.0f;
+			float y = ofGetHeight() - 60.0f;
+			ofSetColor(0, 0, 0, 150);
+			titleFont.drawString(clusterLabel, x + 2, y + 2);
+			ofSetColor(255, 255, 255, 220);
+			titleFont.drawString(clusterLabel, x, y);
+		} else {
+			float strWidth = clusterLabel.length() * 8.0f;
+			float x = (ofGetWidth() - strWidth) / 2.0f;
+			float y = ofGetHeight() - 40.0f;
+			ofSetColor(0, 0, 0, 150);
+			ofDrawBitmapString(clusterLabel, x + 2, y + 2);
+			ofSetColor(255, 255, 255, 220);
+			ofDrawBitmapString(clusterLabel, x, y);
+		}
+	}
+
 	// Draw Mouse Scrubbing Feedback
 	if (currentMode == NAVIGATE && !mouseActivePoints.empty()) {
 		ofPushMatrix();
@@ -1113,9 +1196,24 @@ void ofApp::drawVisuals() {
 	ofDrawBitmapString("Mode: " + modeStr, 20, 20);
 	ofDrawBitmapString("Zoom: " + ofToString(zoom), 20, 40);
 	ofDrawBitmapString("Paths: " + ofToString(paths.size()), 20, 60);
-	ofDrawBitmapString("Audio Mode: " + string(defaultPathMode == PathObject::LOOP_MODE ? "LOOP" : "ONCE"), 20, 80);
+	string dimStr = "NONE";
+	switch (currentThirdDimMode) {
+	case ThirdDimMode::INSTABILITY:
+		dimStr = "INSTABILITY";
+		break;
+	case ThirdDimMode::ATTACK:
+		dimStr = "ATTACK";
+		break;
+	case ThirdDimMode::BRIGHTNESS:
+		dimStr = "SPECTRAL CENTROID";
+		break;
+	default:
+		break;
+	}
+	ofDrawBitmapString("3D Dim: " + dimStr, 20, 80);
+	ofDrawBitmapString("Audio Mode: " + string(defaultPathMode == PathObject::LOOP_MODE ? "LOOP" : "ONCE"), 20, 100);
 
-	int textY = 100;
+	int textY = 120;
 	if (selectedPath) {
 		ofDrawBitmapString("Selected: " + selectedPath->name + " - Video: " + (selectedPath->sendToVideo ? "ON" : "OFF"), 20, textY);
 		textY += 20;
@@ -1419,6 +1517,85 @@ void ofApp::keyPressed(int key) {
 		bHoldingR = true;
 		break;
 
+	case CMD_CLOUD_LOCAL:
+		currentCloudMode = PointCloudMode::LOCAL;
+		ofLogNotice("ofApp") << "Switched to LOCAL point cloud";
+		break;
+
+	case CMD_CLOUD_MID:
+		currentCloudMode = PointCloudMode::MID;
+		ofLogNotice("ofApp") << "Switched to MID point cloud";
+		break;
+
+	case CMD_CLOUD_GLOBAL:
+		currentCloudMode = PointCloudMode::GLOBAL;
+		ofLogNotice("ofApp") << "Switched to GLOBAL point cloud";
+		break;
+
+	case CMD_CYCLE_THIRD_DIM:
+		switch (currentThirdDimMode) {
+		case ThirdDimMode::NONE:
+			currentThirdDimMode = ThirdDimMode::INSTABILITY;
+			ofLogNotice("ofApp") << "Third Dim: INSTABILITY";
+			break;
+		case ThirdDimMode::INSTABILITY:
+			currentThirdDimMode = ThirdDimMode::ATTACK;
+			ofLogNotice("ofApp") << "Third Dim: ATTACK";
+			break;
+		case ThirdDimMode::ATTACK:
+			currentThirdDimMode = ThirdDimMode::BRIGHTNESS;
+			ofLogNotice("ofApp") << "Third Dim: BRIGHTNESS";
+			break;
+		case ThirdDimMode::BRIGHTNESS:
+			currentThirdDimMode = ThirdDimMode::NONE;
+			ofLogNotice("ofApp") << "Third Dim: NONE";
+			break;
+		}
+		break;
+
+	case CMD_CLUSTER_PREV:
+		if (!sortedClusterIds.empty()) {
+			if (activeClusterId == -999) {
+				activeClusterId = sortedClusterIds.back();
+			} else {
+				auto it = std::find(sortedClusterIds.begin(), sortedClusterIds.end(), activeClusterId);
+				if (it == sortedClusterIds.end() || it == sortedClusterIds.begin()) {
+					activeClusterId = sortedClusterIds.back();
+				} else {
+					--it;
+					activeClusterId = *it;
+				}
+			}
+			std::string label = (clusters.count(activeClusterId) && !clusters[activeClusterId].label.empty())
+				? clusters[activeClusterId].label : "id " + ofToString(activeClusterId);
+			ofLogNotice("ofApp") << "Cluster filter: " << label;
+		}
+		break;
+
+	case CMD_CLUSTER_NEXT:
+		if (!sortedClusterIds.empty()) {
+			if (activeClusterId == -999) {
+				activeClusterId = sortedClusterIds.front();
+			} else {
+				auto it = std::find(sortedClusterIds.begin(), sortedClusterIds.end(), activeClusterId);
+				if (it == sortedClusterIds.end() || std::next(it) == sortedClusterIds.end()) {
+					activeClusterId = sortedClusterIds.front();
+				} else {
+					++it;
+					activeClusterId = *it;
+				}
+			}
+			std::string label = (clusters.count(activeClusterId) && !clusters[activeClusterId].label.empty())
+				? clusters[activeClusterId].label : "id " + ofToString(activeClusterId);
+			ofLogNotice("ofApp") << "Cluster filter: " << label;
+		}
+		break;
+
+	case CMD_CLUSTER_CLEAR:
+		activeClusterId = -999;
+		ofLogNotice("ofApp") << "Cluster filter cleared";
+		break;
+
 	case CMD_DECREASE_RADIUS: // 'R'
 		if (selectedPath) {
 			selectedPath->radius -= 10.0f;
@@ -1490,21 +1667,26 @@ void ofApp::keyPressed(int key) {
 		newPath->isSequential = true;
 		newPath->radius = 1.0f; // Minimal radius as we use step logic
 
-		// Sort points
-		std::vector<DataPoint> sortedPoints = points; // Copy
-		std::sort(sortedPoints.begin(), sortedPoints.end(), [](const DataPoint & a, const DataPoint & b) {
-			// Handle empty filenames?
-			if (a.filename.empty() && b.filename.empty()) return false;
-			if (a.filename.empty()) return true; // Empty first? or last?
-			if (b.filename.empty()) return false;
-			return naturalCompare(a.filename, b.filename) < 0;
+		// Sort point pointers
+		std::vector<const DataPoint *> sortedPtrs;
+		sortedPtrs.reserve(points.size());
+		for (const auto & p : points)
+			sortedPtrs.push_back(&p);
+
+		std::sort(sortedPtrs.begin(), sortedPtrs.end(), [](const DataPoint * a, const DataPoint * b) {
+			if (a->filename.empty() && b->filename.empty()) return false;
+			if (a->filename.empty()) return true;
+			if (b->filename.empty()) return false;
+			return naturalCompare(a->filename, b->filename) < 0;
 		});
 
+		newPath->attachedPoints = sortedPtrs;
+
 		// Build polyline as straight lines — no smoothing for sequential paths
-		newPath->sequentialPoints = sortedPoints;
-		for (const auto & p : sortedPoints) {
-			newPath->controlPoints.push_back(ofVec2f(p.x, p.y));
-			newPath->polyline.addVertex(p.x, p.y, 0);
+		for (const auto * p : sortedPtrs) {
+			newPath->sequentialPoints.push_back(*p);
+			newPath->controlPoints.push_back(ofVec2f(p->x, p->y));
+			newPath->polyline.addVertex(p->x, p->y, 0);
 		}
 		// Do not call finalize() — we want straight lines, not a smoothed spline
 
@@ -2077,7 +2259,7 @@ bool ofApp::loadPoints(string jsonPath) {
 		float minY = std::numeric_limits<float>::max();
 		float maxY = std::numeric_limits<float>::lowest();
 
-		const Json::Value* pointsJson = nullptr;
+		const Json::Value * pointsJson = nullptr;
 
 		if (isLegacyArray) {
 			pointsJson = &json;
@@ -2085,7 +2267,7 @@ bool ofApp::loadPoints(string jsonPath) {
 			if (json.isMember("clusters")) {
 				std::vector<std::string> clusterKeys = json["clusters"].getMemberNames();
 				for (size_t i = 0; i < clusterKeys.size(); ++i) {
-					const Json::Value& c = json["clusters"][clusterKeys[i]];
+					const Json::Value & c = json["clusters"][clusterKeys[i]];
 					ClusterInfo ci;
 					ci.id = c["id"].asInt();
 					ci.label = c["label"].asString();
@@ -2100,7 +2282,7 @@ bool ofApp::loadPoints(string jsonPath) {
 
 		if (pointsJson && pointsJson->isArray()) {
 			for (Json::ArrayIndex i = 0; i < pointsJson->size(); ++i) {
-				const Json::Value& pt = (*pointsJson)[i];
+				const Json::Value & pt = (*pointsJson)[i];
 				float x = pt["x"].asFloat();
 				float y = pt["y"].asFloat();
 				string filename = pt.isMember("file") ? pt["file"].asString() : (pt.isMember("filename") ? pt["filename"].asString() : "");
@@ -2111,6 +2293,8 @@ bool ofApp::loadPoints(string jsonPath) {
 				// Parse new fields
 				if (pt.isMember("pos_local") && pt["pos_local"].isArray()) {
 					p.pos_local.set(pt["pos_local"][0].asFloat(), pt["pos_local"][1].asFloat());
+				} else {
+					p.pos_local.set(x, y); // Default fallback for legacy files
 				}
 				if (pt.isMember("pos_mid") && pt["pos_mid"].isArray()) {
 					p.pos_mid.set(pt["pos_mid"][0].asFloat(), pt["pos_mid"][1].asFloat());
@@ -2119,6 +2303,8 @@ bool ofApp::loadPoints(string jsonPath) {
 				}
 				if (pt.isMember("pos_global") && pt["pos_global"].isArray()) {
 					p.pos_global.set(pt["pos_global"][0].asFloat(), pt["pos_global"][1].asFloat());
+				} else {
+					p.pos_global.set(x, y); // Default fallback for legacy files
 				}
 
 				if (pt.isMember("instability")) p.instability = pt["instability"].asFloat();
@@ -2196,6 +2382,15 @@ bool ofApp::loadPoints(string jsonPath) {
 		// Rebuild grid
 		spatialGrid = std::make_shared<SpatialGrid>(points, 50.0f / zoom); // Adjust grid cell size based on zoom? Or keep world units?
 		// SpatialGrid uses world units. 50.0f is arbitrary. Let's keep it 50 or adapt to density.
+
+		// Build sorted cluster ID list for stepping
+		sortedClusterIds.clear();
+		for (const auto & kv : clusters) {
+			sortedClusterIds.push_back(kv.first);
+		}
+		std::sort(sortedClusterIds.begin(), sortedClusterIds.end());
+		activeClusterId = -999; // Reset filter on new load
+
 		return true;
 	} else {
 		ofLogError("ofApp::loadPoints") << "Failed to open JSON file: " << jsonPath;
@@ -2289,6 +2484,7 @@ std::shared_ptr<PathObject> ofApp::createWanderingPath(
 	// Add start directly to the polyline as a straight-line segment
 	newPath->controlPoints.push_back(ofVec2f(start.x, start.y));
 	newPath->polyline.addVertex(start.x, start.y, 0);
+	newPath->attachedPoints.push_back(&start);
 
 	// Track visited; track current position as floats
 	std::unordered_set<DataPoint> visited;
@@ -2324,6 +2520,7 @@ std::shared_ptr<PathObject> ofApp::createWanderingPath(
 		// Add straight-line vertex to path
 		newPath->controlPoints.push_back(ofVec2f(next->x, next->y));
 		newPath->polyline.addVertex(next->x, next->y, 0);
+		newPath->attachedPoints.push_back(next);
 		visited.insert(*next);
 		cx = next->x;
 		cy = next->y;
@@ -2395,6 +2592,14 @@ void ofApp::saveComposition(string filepath) {
 				seqArray.append(sq);
 			}
 			pathJson["sequential_points"] = seqArray;
+		}
+
+		if (!p->attachedPoints.empty()) {
+			ofxJSONElement attachedArray;
+			for (int j = 0; j < p->attachedPoints.size(); ++j) {
+				attachedArray.append(p->attachedPoints[j]->filename);
+			}
+			pathJson["attached_points"] = attachedArray;
 		}
 
 		// Save gesture points if applicable
@@ -2535,6 +2740,19 @@ void ofApp::loadCompositionOrPoints(string filepath) {
 						dp.y = seqArray[j]["y"].asFloat();
 						dp.filename = seqArray[j]["filename"].asString();
 						newPath->sequentialPoints.push_back(dp);
+					}
+				}
+
+				if (pJson.isMember("attached_points") && pJson["attached_points"].isArray()) {
+					const ofxJSONElement & attArray = pJson["attached_points"];
+					for (int j = 0; j < attArray.size(); ++j) {
+						std::string fn = attArray[j].asString();
+						for (const auto & dp : points) {
+							if (dp.filename == fn) {
+								newPath->attachedPoints.push_back(&dp);
+								break;
+							}
+						}
 					}
 				}
 

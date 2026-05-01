@@ -36,7 +36,14 @@ enum AppCommand {
 	CMD_TOGGLE_DEFAULT_MODE, // 'l'
 	CMD_TOGGLE_PATH_VIDEO, // 'M'
 	CMD_TOGGLE_VIDEO_LOCK, // ';'
-	CMD_TOGGLE_JITTER // 'j'
+	CMD_TOGGLE_JITTER, // 'j'
+	CMD_CLOUD_LOCAL, // '1'
+	CMD_CLOUD_MID, // '2'
+	CMD_CLOUD_GLOBAL, // '3'
+	CMD_CYCLE_THIRD_DIM, // '4'
+	CMD_CLUSTER_PREV, // '['
+	CMD_CLUSTER_NEXT, // ']'
+	CMD_CLUSTER_CLEAR // '\'
 };
 
 class InputManager {

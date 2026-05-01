@@ -171,6 +171,24 @@ std::string PathObject::getMode() const {
 }
 
 void PathObject::update(float dt) {
+	if (!attachedPoints.empty() && attachedPoints.size() == controlPoints.size()) {
+		bool changed = false;
+		for (size_t i = 0; i < attachedPoints.size(); ++i) {
+			if (controlPoints[i].x != attachedPoints[i]->x || controlPoints[i].y != attachedPoints[i]->y) {
+				changed = true;
+				break;
+			}
+		}
+		if (changed) {
+			polyline.clear();
+			for (size_t i = 0; i < attachedPoints.size(); ++i) {
+				controlPoints[i].x = attachedPoints[i]->x;
+				controlPoints[i].y = attachedPoints[i]->y;
+				polyline.addVertex(controlPoints[i].x, controlPoints[i].y, 0);
+			}
+		}
+	}
+
 	if (!isActive)
 		return;
 

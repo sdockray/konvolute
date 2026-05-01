@@ -90,6 +90,22 @@ AppCommand InputManager::getCommandForKey(int key) {
 	case 'j':
 	case 'J':
 		return CMD_TOGGLE_JITTER;
+	case '1':
+		return CMD_CLOUD_LOCAL;
+	case '2':
+		return CMD_CLOUD_MID;
+	case '3':
+		return CMD_CLOUD_GLOBAL;
+	case '4':
+	case '`':
+	case '~':
+		return CMD_CYCLE_THIRD_DIM;
+	case '[':
+		return CMD_CLUSTER_PREV;
+	case ']':
+		return CMD_CLUSTER_NEXT;
+	case '\\':
+		return CMD_CLUSTER_CLEAR;
 	default:
 		return CMD_NONE;
 	}

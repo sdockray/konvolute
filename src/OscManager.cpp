@@ -39,7 +39,6 @@ void OscManager::addToHistory(const ofxOscMessage & m) {
 }
 
 void OscManager::drawDebug(float x, float y) {
-	ofSetColor(255);
 	ofDrawBitmapString("OSC DEBUG (57121 In, 57120 Out, 57122 UI)", x, y);
 	y += 20;
 	for (auto & s : messageHistory) {

@@ -4,22 +4,6 @@
 <dict>
 	<key>files</key>
 	<dict>
-		<key>Resources/data/.gitkeep</key>
-		<data>
-		2jmj7l5rSw0yVb/vlWAYkK/YBwk=
-		</data>
-		<key>Resources/data/Futura.ttc</key>
-		<data>
-		M3of/zu8v0vYgpsxp8g/6t9or+U=
-		</data>
-		<key>Resources/data/settings.xml</key>
-		<data>
-		tO0xEpHgI/4Hde5eUPvT7XRaSv0=
-		</data>
-		<key>Resources/data/timbre_map_data.json</key>
-		<data>
-		y4qFW723D5v19wbLEB5TOuCPldI=
-		</data>
 		<key>Resources/of.icns</key>
 		<data>
 		a3Fd3s3Ae1/WnnSvwTbkPgp3Ue0=
@@ -27,34 +11,6 @@
 	</dict>
 	<key>files2</key>
 	<dict>
-		<key>Resources/data/.gitkeep</key>
-		<dict>
-			<key>hash2</key>
-			<data>
-			47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=
-			</data>
-		</dict>
-		<key>Resources/data/Futura.ttc</key>
-		<dict>
-			<key>hash2</key>
-			<data>
-			xZwE6Oh/dS4uV7Pz1Dp5PrqQep4q/8v+rIXnxneeh48=
-			</data>
-		</dict>
-		<key>Resources/data/settings.xml</key>
-		<dict>
-			<key>hash2</key>
-			<data>
-			AK7D0aymVbB4ODzd+SVZFni6JW6+BORIVxT1oT0FZ+c=
-			</data>
-		</dict>
-		<key>Resources/data/timbre_map_data.json</key>
-		<dict>
-			<key>hash2</key>
-			<data>
-			mSXKouIbVHvdLIB5I08xxZZ6ZDmfwPTGGF5tFHpo2HI=
-			</data>
-		</dict>
 		<key>Resources/of.icns</key>
 		<dict>
 			<key>hash2</key>

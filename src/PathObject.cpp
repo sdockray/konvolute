@@ -31,16 +31,21 @@ PathObject::PathObject(int _id)
 	, pulserRateRand(0.0f)
 	, pulserAttack(0.01f)
 	, pulserRelease(0.1f)
-	// Sequential / Jitter
+	// Sequential / Jitter / Wander
 	, isSequential(false)
+	, isWander(false)
 	, currentStepIndex(-1)
 	, jitterMode(false)
 	, lastJitterStepFloor(-1)
 	, stepMode(false)
 	, stepTimer(0.0f)
-	, hasGesture(false) {
+	, hasGesture(false)
+	, gestureStartTime(0)
+	, gesturePlaybackTime(0.0f)
+	, isPingPong(false)
+	, sendToVideo(true) {
 	name = "path-" + std::to_string(id);
-	mode = LOOP_MODE;
+	mode = ONCE_MODE;
 
 	// Effects: all disabled by default
 	for (int i = 0; i < 5; i++)
@@ -171,9 +176,9 @@ void PathObject::update(float dt) {
 
 	// Step mode: advance currentStepIndex via timer, skip polyline position logic
 	if (stepMode && isSequential && !sequentialPoints.empty()) {
-		stepTimer += speed * dt * 60.0f;
+		stepTimer += speed * dt; // 1.0 speed = 1 step per second
 		if (stepTimer >= 1.0f) {
-			stepTimer = 0.0f;
+			stepTimer -= 1.0f;
 			int n = (int)sequentialPoints.size();
 			if (direction == -1) {
 				currentStepIndex = (currentStepIndex <= 0) ? n - 1 : currentStepIndex - 1;
@@ -189,6 +194,42 @@ void PathObject::update(float dt) {
 	if (polyline.size() == 0)
 		return;
 
+	// -------------------------------------------------------------
+	// GESTURE PLAYBACK
+	// -------------------------------------------------------------
+	if (hasGesture && gesturePoints.size() >= 2) {
+		float durationMs = gesturePoints.back().timeMs - gesturePoints.front().timeMs;
+		if (durationMs > 0.001f) {
+			gesturePlaybackTime += (dt * 1000.0f) * speed; // Advance time based on path speed
+
+			// Wrap playback time over the gesture duration
+			float localTime = std::fmod(gesturePlaybackTime, durationMs);
+			if (localTime < 0) localTime += durationMs;
+
+			long targetTimeMs = gesturePoints.front().timeMs + (long)localTime;
+
+			// Find bounding gesture points and interpolate
+			for (size_t i = 0; i + 1 < gesturePoints.size(); ++i) {
+				const auto & a = gesturePoints[i];
+				const auto & b = gesturePoints[i + 1];
+				if (targetTimeMs >= a.timeMs && targetTimeMs <= b.timeMs) {
+					float t = 0.0f;
+					if (b.timeMs > a.timeMs) {
+						t = (float)(targetTimeMs - a.timeMs) / (float)(b.timeMs - a.timeMs);
+					}
+					position = a.position + t * (b.position - a.position);
+					volume = a.volume + t * (b.volume - a.volume);
+					break;
+				}
+			}
+		}
+		return; // Skip normal playhead movement
+	}
+
+	// -------------------------------------------------------------
+	// NORMAL PLAYHEAD MOVEMENT
+	// -------------------------------------------------------------
+
 	// Update position based on speed and direction
 	// Speed logic needs calibration to match pixels/sec
 	// Processing speed was "units per frame", assumed 60fps
@@ -198,14 +239,20 @@ void PathObject::update(float dt) {
 
 	// Loop Logic
 	if (position >= 1.0f) {
-		if (direction == 2) { // Oscillate
+		if (isPingPong) {
+			speed = -std::abs(speed);
+			position = 1.0f;
+		} else if (direction == 2) { // Oscillate
 			speed = -std::abs(speed);
 			position = 1.0f;
 		} else { // Loop
 			position = 0.0f;
 		}
 	} else if (position <= 0.0f) {
-		if (direction == 2) { // Oscillate
+		if (isPingPong) {
+			speed = std::abs(speed);
+			position = 0.0f;
+		} else if (direction == 2) { // Oscillate
 			speed = std::abs(speed);
 			position = 0.0f;
 		} else {
@@ -222,19 +269,22 @@ ofVec2f PathObject::getCurrentPosition() const {
 	return polyline.getPointAtPercent(position);
 }
 
-void PathObject::draw(float playheadSize, ofColor playheadColor, float zoom) {
+void PathObject::draw(float playheadSize, ofColor playheadColor, float zoom, float pathThickness, float selectedPathThickness, ofColor pathColor, ofColor selectedPathColor) {
 	if (polyline.size() < 2)
 		return;
 
 	if (isSelected) {
-		ofSetColor(255, 255, 0);
-		ofSetLineWidth(2);
+		ofSetColor(selectedPathColor);
+		ofSetLineWidth(selectedPathThickness);
 	} else {
-		ofSetColor(255, 0, 144);
-		ofSetLineWidth(1);
+		ofSetColor(pathColor);
+		ofSetLineWidth(pathThickness);
 	}
 
 	polyline.draw();
+
+	// Reset line width for cursor and other elements
+	ofSetLineWidth(1.0f);
 
 	// Draw cursor
 	ofVec2f pos = getCurrentPosition();

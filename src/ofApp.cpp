@@ -54,8 +54,9 @@ void ofApp::setup() {
 	// Initialize default path 0 for settings
 	auto p0 = std::make_shared<PathObject>(0);
 	p0->name = "path-0";
-	p0->mode = PathObject::LOOP_MODE;
+	p0->mode = defaultPathMode;
 	p0->isActive = false; // Not playing by itself
+	p0->sendToVideo = false; // Don't trigger videos for browsing/hovering by default
 	// User requested path-0 notification
 	oscManager.sendUIPathAdd(p0->name);
 	paths.push_back(p0);
@@ -95,6 +96,7 @@ void ofApp::setup() {
 	params.add(textColor.set("Text Color", ofColor(255), ofColor(0, 0), ofColor(255, 255)));
 	params.add(activeTextColor.set("Active Text Color", ofColor(0, 255, 0), ofColor(0, 0), ofColor(255, 255)));
 	params.add(titleColor.set("Title Color", ofColor(255, 255, 255), ofColor(0, 0), ofColor(255, 255)));
+	params.add(debugTextColor.set("Debug Text Color", ofColor(255), ofColor(0, 0), ofColor(255, 255)));
 
 	params.add(pointSize.set("Point Size", 5.0f, 1.0f, 100.0f)); // Increased default to 5.0
 	params.add(selectedPointSize.set("Sel Point Size", 8.0f, 1.0f, 30.0f));
@@ -103,9 +105,17 @@ void ofApp::setup() {
 	params.add(activeFontSize.set("Active Font Size", 14.0f, 8.0f, 48.0f));
 	params.add(titleFontSize.set("Title Font Size", 48.0f, 12.0f, 120.0f));
 	params.add(playheadSize.set("Playhead Size", 5.0f, 1.0f, 200.0f));
+	params.add(pathThickness.set("Path Thickness", 1.0f, 0.1f, 20.0f));
+	params.add(selectedPathThickness.set("Selected Path Thickness", 2.0f, 0.1f, 20.0f));
 	params.add(playheadColor.set("Playhead Color", ofColor(255), ofColor(0, 0), ofColor(255, 255)));
 	params.add(videoFitMode.set("Video Fit 0=stretch 1=height 2=width", 0, 0, 2));
-	params.add(videoFadeSpeed_param.set("Video Fade Speed", 15.0f, 1.0f, 255.0f));
+	params.add(videoDisplayMode.set("Video Mode 0=default, 1=grid", 0, 0, 1));
+	params.add(videoFadeSpeed_param.set("Video Fade Speed", 15.0f, 1.0f, 60.0f));
+
+	// Initialize Grid mode layers
+	for (int i = 0; i < (GRID_COLS * GRID_ROWS); i++) {
+		gridPlayers.push_back(std::make_shared<ofVideoPlayer>());
+	}
 
 	gui.setup(params);
 	gui.loadFromFile("settings.xml");
@@ -417,14 +427,17 @@ void ofApp::update() {
 
 						// Trigger new
 						float vol = 0.5f;
-						string mode = "loop";
+						string mode = "once";
 						if (paths.size() > 0) {
 							vol = paths[0]->volume;
 							mode = paths[0]->getMode();
 						}
 
 						oscManager.sendSample(mediaRoot + hoveredPoint.filename, "path-0", vol, mode);
-
+						// possibly trigger video
+						if (paths.size() > 0) {
+							if (showVideo && paths[0]->sendToVideo) triggerVideo(hoveredPoint);
+						}
 						lastHoveredPoint = hoveredPoint;
 						hasLastHoveredPoint = true;
 					}
@@ -447,27 +460,10 @@ void ofApp::update() {
 		int prevStepIndex = path->currentStepIndex; // snapshot before update (for stepMode detection)
 		path->update(dt);
 
-		// ---- Gesture playback constraint ----
-		// If a gesture is recorded, wrap path position into the gesture range
-		// and override volume with the gesture curve.
 		float effectiveVolume = path->volume;
-		if (path->hasGesture && path->gesturePoints.size() >= 2) {
-			float gMin = path->gesturePoints.front().position;
-			float gMax = path->gesturePoints.back().position;
-			float span = gMax - gMin;
-			if (span > 0.001f) {
-				// Wrap position into [gMin, gMax]
-				float localPos = std::fmod(path->position - gMin, span);
-				if (localPos < 0) localPos += span;
-				path->position = gMin + localPos;
-			} else {
-				path->position = gMin;
-			}
-			effectiveVolume = path->getGestureVolume(path->position);
-		}
 
 		// Audio Sampling Logic
-		if (path->isActive) {
+		if (path->isActive && spatialGrid) {
 			// Get active points
 			std::vector<DataPoint> activePoints = path->getActivePoints(points, *spatialGrid);
 
@@ -493,7 +489,7 @@ void ofApp::update() {
 								DataPoint & curr = path->sequentialPoints[path->currentStepIndex];
 								oscManager.sendSample(mediaRoot + curr.filename, path->name, effectiveVolume, path->getMode());
 								path->playingPoints.insert(curr);
-								if (showVideo) triggerVideo(curr);
+								if (showVideo && path->sendToVideo) triggerVideo(curr);
 							}
 						}
 						continue; // skip posFloor logic
@@ -512,22 +508,25 @@ void ofApp::update() {
 							// A boundary was crossed — decide where to go
 							path->lastJitterStepFloor = posFloor;
 							float r = ofRandom(1.0f);
-							if (r < 0.25f) {
-								// 25%: go back one
+							if (r < 0.15f) {
+								// 15%: go back one
 								nextStepIndex = path->currentStepIndex - 1;
-							} else if (r < 0.50f) {
-								// 25%: repeat (stay)
+							} else if (r < 0.85f) {
+								// 70%: repeat (stay)
 								nextStepIndex = path->currentStepIndex;
 							} else {
-								// 50%: advance one
+								// 15%: advance one
 								nextStepIndex = path->currentStepIndex + 1;
 							}
 							// Wrap circularly
 							nextStepIndex = ((nextStepIndex % totalSteps) + totalSteps) % totalSteps;
-							stepChanged = (nextStepIndex != path->currentStepIndex);
+
+							// Force trigger for jitter even if the step index didn't change
+							stepChanged = true;
 						} else {
 							// No boundary crossed this frame
 							nextStepIndex = path->currentStepIndex;
+							stepChanged = false;
 						}
 					} else {
 						// Normal sequential: advance exactly ONE step per frame toward posFloor,
@@ -553,18 +552,22 @@ void ofApp::update() {
 
 					// Handle step transition
 					if (stepChanged) {
-						// Stop previous
+						// Stop previous (only if we are moving to a different index, or if it's the same index allow it to overlap or stop/restart)
+						// For granular/loops, stopping and restarting the same sample might clip, but for 'once' it acts as a retrigger.
 						if (path->currentStepIndex >= 0 && path->currentStepIndex < totalSteps) {
 							DataPoint & prev = path->sequentialPoints[path->currentStepIndex];
+							// Don't stop it if it's literally the same sample we are about to re-trigger, unless it's ONCE mode where we might want to restart?
+							// Actually, to make "stay" audible as a rhythm, we should stop and restart, or just fire a new instance.
+							// ofxOscManager stopSample sends an OSC array release. Let's stop the previous explicitly.
 							oscManager.stopSample(mediaRoot + prev.filename, path->name);
 							path->playingPoints.erase(prev);
 						}
-						// Play new
+						// Play new (or same)
 						if (nextStepIndex >= 0 && nextStepIndex < totalSteps) {
 							DataPoint & curr = path->sequentialPoints[nextStepIndex];
 							oscManager.sendSample(mediaRoot + curr.filename, path->name, effectiveVolume, path->getMode());
 							path->playingPoints.insert(curr);
-							if (showVideo) triggerVideo(curr);
+							if (showVideo && path->sendToVideo) triggerVideo(curr);
 						}
 						path->currentStepIndex = nextStepIndex;
 					} else if (path->currentStepIndex < 0 && posFloor >= 0) {
@@ -584,6 +587,9 @@ void ofApp::update() {
 				// Skip the spatial radius logic below for sequential paths
 				continue;
 			}
+
+			if (!path->isActive) continue;
+			if (path->name == "path-0") continue; // Skip the default browse path
 
 			// ---------------------------------------------------------
 			// NEW LOGIC: Managed Playing Points
@@ -624,7 +630,7 @@ void ofApp::update() {
 						slotsAvailable--;
 
 						// Trigger Sound
-						if (path->mode == PathObject::LOOP_MODE || path->mode == PathObject::MIXED_MODE) {
+						if (path->mode == PathObject::LOOP_MODE || path->mode == PathObject::MIXED_MODE || path->mode == PathObject::ONCE_MODE) {
 							// Calculate volume based on distance
 							float d = path->getDistanceToPoint(ofVec2f(p.x, p.y));
 							float vol = effectiveVolume * (1.0f - (d / path->radius));
@@ -632,55 +638,20 @@ void ofApp::update() {
 							oscManager.sendSample(mediaRoot + p.filename, path->name, vol, path->getMode());
 						}
 
-						// Trigger Video (Only for the first playing point? Or all? Let's keep existing logic: Trigger on start)
-						if (showVideo) {
-							// Rate limited video switching
-							long now = ofGetElapsedTimeMillis();
-							if (now - lastVideoSwitchTime > 50) { // 50ms limit
-								lastVideoSwitchTime = now;
-
-								string videoPath = "";
-								string baseName = ofFilePath::removeExt(p.filename);
-
-								if (mediaRoot != "") {
-									string nestedPath = mediaRoot + "video_segments/" + baseName + ".mp4";
-									lastAttemptedVideoPath = nestedPath;
-									if (ofFile(nestedPath).exists()) {
-										videoPath = nestedPath;
-									} else {
-										lastAttemptedVideoPath += " (Missing)";
-										videoPath = mediaRoot + baseName + ".mp4";
-									}
-								} else {
-									videoPath = baseName + ".mp4";
-									lastAttemptedVideoPath = videoPath;
-								}
-
-								ofFile vFile(videoPath);
-								string curPath = videoFront->isLoaded() ? videoFront->getMoviePath() : "";
-								if (vFile.exists() && curPath != videoPath) {
-									std::swap(videoFront, videoBack);
-									videoFront->load(videoPath);
-									videoFront->setLoopState(OF_LOOP_NORMAL);
-									videoFront->play();
-									videoFront->setVolume(0);
-									videoAlpha = 0.0f;
-									videoAlphaTarget = 255.0f;
-								}
-							}
-						}
+						// Trigger Video
+						if (showVideo && path->sendToVideo) triggerVideo(p);
 					}
 				}
 			}
 
 			// 3. Continuous Updates for Playing Points
-			if (path->mode == PathObject::LOOP_MODE || path->mode == PathObject::MIXED_MODE || path->mode == PathObject::CLOUD_MODE) {
+			if (path->mode == PathObject::LOOP_MODE || path->mode == PathObject::MIXED_MODE || path->mode == PathObject::CLOUD_MODE || path->mode == PathObject::ONCE_MODE) {
 				for (const auto & p : path->playingPoints) {
 					float d = path->getDistanceToPoint(ofVec2f(p.x, p.y));
 					float vol = effectiveVolume * (1.0f - (d / path->radius));
 					vol = MAX(0, vol);
 
-					if (path->mode == PathObject::LOOP_MODE || path->mode == PathObject::MIXED_MODE) {
+					if (path->mode == PathObject::LOOP_MODE || path->mode == PathObject::MIXED_MODE || path->mode == PathObject::ONCE_MODE) {
 						// Send volume update (if we had a generic update message, or just re-send sample command with updated vol?
 						// OscManager::sendSample triggers a new play. We need a volume update or parameter update.
 						// OscManager currently has sendPathVolume (global for path) but not per-voice volume unless we use specific voice allocation API.
@@ -726,48 +697,84 @@ void ofApp::update() {
 	}
 
 	if (showVideo) {
-		videoFront->update();
-		videoBack->update();
-		// Sync fade speed from GUI param
-		videoFadeSpeed = videoFadeSpeed_param.get();
-		// Advance crossfade alpha toward target
-		if (videoAlpha < videoAlphaTarget)
-			videoAlpha = std::min(videoAlpha + videoFadeSpeed, videoAlphaTarget);
-		else if (videoAlpha > videoAlphaTarget)
-			videoAlpha = std::max(videoAlpha - videoFadeSpeed, videoAlphaTarget);
+		if (videoDisplayMode.get() == 0) {
+			videoFront->update();
+			videoBack->update();
+			// Sync fade speed from GUI param
+			videoFadeSpeed = videoFadeSpeed_param.get();
+			// Advance crossfade alpha toward target
+			if (videoAlpha < videoAlphaTarget)
+				videoAlpha = std::min(videoAlpha + videoFadeSpeed, videoAlphaTarget);
+			else if (videoAlpha > videoAlphaTarget)
+				videoAlpha = std::max(videoAlpha - videoFadeSpeed, videoAlphaTarget);
 
-		// Capture the front player's current frame to the hold FBO.
-		// Only fires when a genuinely new frame has been decoded — never captures
-		// a loading artefact or black frame.
-		if (videoFront->isFrameNew() && videoFront->getWidth() > 0) {
-			// Lazily allocate here so window size is definitely known
-			if (!videoHoldAllocated) {
-				videoHoldFbo.allocate(ofGetWidth(), ofGetHeight(), GL_RGB);
-				videoHoldAllocated = true;
+			// Capture the front player's current frame to the hold FBO.
+			// Only fires when a genuinely new frame has been decoded — never captures
+			// a loading artefact or black frame.
+			if (videoFront->isFrameNew() && videoFront->getWidth() > 0) {
+				// Lazily allocate here so window size is definitely known
+				if (!videoHoldAllocated) {
+					videoHoldFbo.allocate(ofGetWidth(), ofGetHeight(), GL_RGB);
+					videoHoldAllocated = true;
+				}
+				videoHoldFbo.begin();
+				ofClear(backgroundColor.get().r,
+					backgroundColor.get().g,
+					backgroundColor.get().b, 255);
+				ofSetColor(255);
+				// Draw with current fit mode into the FBO
+				float vw = videoFront->getWidth(), vh = videoFront->getHeight();
+				float sw = (float)ofGetWidth(), sh = (float)ofGetHeight();
+				float x = 0, y = 0, dw = sw, dh = sh;
+				int fitMode = videoFitMode.get();
+				if (fitMode == 1 && vh > 0) {
+					dh = sh;
+					dw = (vw / vh) * sh;
+					x = (sw - dw) * 0.5f;
+					y = 0;
+				} else if (fitMode == 2 && vw > 0) {
+					dw = sw;
+					dh = (vh / vw) * sw;
+					x = 0;
+					y = (sh - dh) * 0.5f;
+				}
+				videoFront->draw(x, y, dw, dh);
+				videoHoldFbo.end();
 			}
-			videoHoldFbo.begin();
-			ofClear(backgroundColor.get().r,
-				backgroundColor.get().g,
-				backgroundColor.get().b, 255);
-			ofSetColor(255);
-			// Draw with current fit mode into the FBO
-			float vw = videoFront->getWidth(), vh = videoFront->getHeight();
-			float sw = (float)ofGetWidth(), sh = (float)ofGetHeight();
-			float x = 0, y = 0, dw = sw, dh = sh;
-			int fitMode = videoFitMode.get();
-			if (fitMode == 1 && vh > 0) {
-				dh = sh;
-				dw = (vw / vh) * sh;
-				x = (sw - dw) * 0.5f;
-				y = 0;
-			} else if (fitMode == 2 && vw > 0) {
-				dw = sw;
-				dh = (vh / vw) * sw;
-				x = 0;
-				y = (sh - dh) * 0.5f;
+		} else {
+			// GRID MODE
+
+			// 1. Shift videos when a new one is queued
+			if (!videoQueue.empty()) {
+				string nextVideo = videoQueue.front();
+				videoQueue.pop_front();
+
+				// Retrieve the last player in the array (evicted)
+				auto evictedPlayer = gridPlayers.back();
+				evictedPlayer->stop();
+				evictedPlayer->close();
+
+				// Shift all elements one step back
+				for (int i = gridPlayers.size() - 1; i > 0; --i) {
+					gridPlayers[i] = gridPlayers[i - 1];
+				}
+
+				// Place the evicted (now fresh) player at [0]
+				gridPlayers[0] = evictedPlayer;
+
+				// Start the new clip in cell [0]
+				gridPlayers[0]->load(nextVideo);
+				gridPlayers[0]->setLoopState(OF_LOOP_NORMAL);
+				gridPlayers[0]->play();
+				gridPlayers[0]->setVolume(0);
 			}
-			videoFront->draw(x, y, dw, dh);
-			videoHoldFbo.end();
+
+			// 2. Continuous updates on all active cell players
+			for (auto & player : gridPlayers) {
+				if (player->isLoaded() && player->isPlaying()) {
+					player->update();
+				}
+			}
 		}
 	}
 
@@ -790,43 +797,90 @@ void ofApp::drawVisuals() {
 
 	// Draw Video Background
 	if (showVideo) {
-		if (videoHoldAllocated) {
-			// Paint the last-captured frame as a persistent background.
-			// This is always opaque — covers any gap/flicker from the live player.
-			ofSetColor(255, 255, 255, 255);
-			videoHoldFbo.draw(0, 0);
-		} else {
-			ofBackground(backgroundColor); // before first frame is ever captured
-		}
-
-		// Draw the live front player on top as it fades in (0 → 255 on clip switch).
-		// When alpha reaches 255 it fully covers the held background; the FBO then
-		// captures this live frame on the next update, keeping them in sync.
-		if (videoFront->isLoaded() && videoFront->getWidth() > 0) {
-			ofEnableBlendMode(OF_BLENDMODE_ALPHA);
-			ofSetColor(255, 255, 255, (int)std::clamp(videoAlpha, 0.0f, 255.0f));
-			float vw = videoFront->getWidth(), vh = videoFront->getHeight();
-			float sw = (float)ofGetWidth(), sh = (float)ofGetHeight();
-			float x = 0, y = 0, dw = sw, dh = sh;
-			int fitMode = videoFitMode.get();
-			if (fitMode == 1 && vh > 0) {
-				dh = sh;
-				dw = (vw / vh) * sh;
-				x = (sw - dw) * 0.5f;
-				y = 0;
-			} else if (fitMode == 2 && vw > 0) {
-				dw = sw;
-				dh = (vh / vw) * sw;
-				x = 0;
-				y = (sh - dh) * 0.5f;
+		if (videoDisplayMode.get() == 0) {
+			if (videoHoldAllocated) {
+				// Paint the last-captured frame as a persistent background.
+				// This is always opaque — covers any gap/flicker from the live player.
+				ofSetColor(255, 255, 255, 255);
+				videoHoldFbo.draw(0, 0);
+			} else {
+				ofBackground(backgroundColor); // before first frame is ever captured
 			}
-			videoFront->draw(x, y, dw, dh);
-			ofDisableBlendMode();
+
+			// Draw the live front player on top as it fades in (0 → 255 on clip switch).
+			// When alpha reaches 255 it fully covers the held background; the FBO then
+			// captures this live frame on the next update, keeping them in sync.
+			if (videoFront->isLoaded() && videoFront->getWidth() > 0) {
+				ofEnableBlendMode(OF_BLENDMODE_ALPHA);
+				ofSetColor(255, 255, 255, (int)std::clamp(videoAlpha, 0.0f, 255.0f));
+				float vw = videoFront->getWidth(), vh = videoFront->getHeight();
+				float sw = (float)ofGetWidth(), sh = (float)ofGetHeight();
+				float x = 0, y = 0, dw = sw, dh = sh;
+				int fitMode = videoFitMode.get();
+				if (fitMode == 1 && vh > 0) {
+					dh = sh;
+					dw = (vw / vh) * sh;
+					x = (sw - dw) * 0.5f;
+					y = 0;
+				} else if (fitMode == 2 && vw > 0) {
+					dw = sw;
+					dh = (vh / vw) * sw;
+					x = 0;
+					y = (sh - dh) * 0.5f;
+				}
+				videoFront->draw(x, y, dw, dh);
+				ofDisableBlendMode();
+			}
+			ofSetColor(255);
+		} else if (videoDisplayMode.get() == 1) {
+			// GRID MODE
+			ofBackground(backgroundColor);
+
+			float sw = (float)ofGetWidth();
+			float sh = (float)ofGetHeight();
+			float cellWidth = sw / GRID_COLS;
+			float cellHeight = sh / GRID_ROWS;
+			float gutter = 2.0f; // 2px uniform gutter
+
+			ofSetColor(255);
+			for (size_t i = 0; i < gridPlayers.size(); ++i) {
+				auto & player = gridPlayers[i];
+				if (player->isLoaded() && player->getWidth() > 0) {
+					int col = i % GRID_COLS;
+					int row = i / GRID_COLS;
+
+					// Compute bounding box for cell with gutter
+					float cx = col * cellWidth + gutter;
+					float cy = row * cellHeight + gutter;
+					float cw = cellWidth - (gutter * 2);
+					float ch = cellHeight - (gutter * 2);
+
+					// Render video based on fit mode
+					float vw = player->getWidth(), vh = player->getHeight();
+					float x = cx, y = cy, dw = cw, dh = ch;
+					int fitMode = videoFitMode.get();
+
+					if (fitMode == 1 && vh > 0) {
+						dh = ch;
+						dw = (vw / vh) * ch;
+						x = cx + (cw - dw) * 0.5f;
+						y = cy;
+					} else if (fitMode == 2 && vw > 0) {
+						dw = cw;
+						dh = (vh / vw) * cw;
+						x = cx;
+						y = cy + (ch - dh) * 0.5f;
+					}
+
+					player->draw(x, y, dw, dh);
+				}
+			}
 		}
-		ofSetColor(255);
 	} else {
 		ofBackground(backgroundColor);
 	}
+
+	ofEnableAlphaBlending();
 
 	ofPushMatrix();
 	ofTranslate(ofGetWidth() / 2, ofGetHeight() / 2);
@@ -835,12 +889,11 @@ void ofApp::drawVisuals() {
 
 	// Draw Points
 	ofFill(); // Ensure fill is enabled
+	ofColor c = pointColor.get();
 	if (showText) {
-		ofColor c = pointColor.get();
-		ofSetColor(c.r, c.g, c.b, 25); // 10% opacity
+		ofSetColor(c.r, c.g, c.b, std::min((float)c.a, 25.0f)); // cap opacity so text is readable
 	} else {
-		ofColor c = pointColor.get();
-		ofSetColor(c.r, c.g, c.b, 255); // Force full opacity if not showing text
+		ofSetColor(c); // Use user opacity when not showing text
 	}
 
 	for (const auto & p : points) {
@@ -850,12 +903,13 @@ void ofApp::drawVisuals() {
 	// Draw Text
 	// Draw Paths
 	for (auto & path : paths) {
-		path->draw(playheadSize / zoom, playheadColor, zoom);
+		path->draw(playheadSize / zoom, playheadColor.get(), zoom, pathThickness.get(), selectedPathThickness.get(), pathColor.get(), selectedPathColor.get());
 	}
 
 	// Draw current path
 	if (isDrawingPath && currentPath) {
-		ofSetColor(255, 100, 100);
+		ofSetColor(pathColor.get());
+		ofSetLineWidth(selectedPathThickness.get());
 		// Only draw the line, not the playhead circle
 		currentPath->polyline.draw();
 	}
@@ -1016,7 +1070,7 @@ void ofApp::drawVisuals() {
 	}
 
 	// Draw UI
-	ofSetColor(255);
+	ofSetColor(debugTextColor.get());
 	string modeStr = "";
 	switch (currentMode) {
 	case NAVIGATE:
@@ -1041,12 +1095,27 @@ void ofApp::drawVisuals() {
 	ofDrawBitmapString("Mode: " + modeStr, 20, 20);
 	ofDrawBitmapString("Zoom: " + ofToString(zoom), 20, 40);
 	ofDrawBitmapString("Paths: " + ofToString(paths.size()), 20, 60);
-	ofDrawBitmapString("Video Mode (m): " + ofToString(showVideo ? "ON" : "OFF"), 20, 80);
+	ofDrawBitmapString("Audio Mode: " + string(defaultPathMode == PathObject::LOOP_MODE ? "LOOP" : "ONCE"), 20, 80);
+
+	int textY = 100;
+	if (selectedPath) {
+		ofDrawBitmapString("Selected: " + selectedPath->name + " - Video: " + (selectedPath->sendToVideo ? "ON" : "OFF"), 20, textY);
+		textY += 20;
+	}
+
+	ofDrawBitmapString("Video Mode (m): " + ofToString(showVideo ? "ON" : "OFF"), 20, textY);
+	textY += 20;
+	ofDrawBitmapString("Video Trigger (;): " + string(videoTriggerLocked ? "LOCKED" : "UNLOCKED"), 20, textY);
+	textY += 20;
 	if (showVideo) {
-		ofDrawBitmapString("Media Root: " + mediaRoot, 20, 100);
-		ofDrawBitmapString("Loaded Video: " + ofToString(videoFront->getMoviePath()), 20, 120);
-		ofDrawBitmapString("Last Attempted: " + lastAttemptedVideoPath, 20, 140);
-		ofDrawBitmapString("Video Playing: " + ofToString(videoFront->isPlaying()), 20, 160);
+		ofDrawBitmapString("Media Root: " + mediaRoot, 20, textY);
+		textY += 20;
+		ofDrawBitmapString("Loaded Video: " + ofToString(videoFront->getMoviePath()), 20, textY);
+		textY += 20;
+		ofDrawBitmapString("Last Attempted: " + lastAttemptedVideoPath, 20, textY);
+		textY += 20;
+		ofDrawBitmapString("Video Playing: " + ofToString(videoFront->isPlaying()), 20, textY);
+		textY += 20;
 	}
 
 	// Draw OSC Debug
@@ -1096,6 +1165,16 @@ void ofApp::drawVisuals() {
 		ly += lineH;
 		ofDrawBitmapString("  v / V Increase / decrease playback volume", lx, ly);
 		ly += lineH * 2;
+		ofDrawBitmapString("--- Path Types & Modes ---", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  q     Create Sequential path from points", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  e     Toggle step mode (Sequential paths)", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  j     Toggle jitter mode (probabilistic advance)", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  l     Toggle default path mode (LOOP/ONCE)", lx, ly);
+		ly += lineH * 2;
 		ofDrawBitmapString("--- Scrub & Gesture ---", lx, ly);
 		ly += lineH;
 		ofDrawBitmapString("  Alt+move    Scrub position (X) & volume (Y)", lx, ly);
@@ -1103,6 +1182,10 @@ void ofApp::drawVisuals() {
 		ofDrawBitmapString("  Alt+drag    Record gesture (position+volume)", lx, ly);
 		ly += lineH;
 		ofDrawBitmapString("  g           Clear gesture on selected path", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  v+drag      Adjust volume on browse or selected path", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  r+drag      Adjust radius on selected path", lx, ly);
 		ly += lineH * 2;
 		ofDrawBitmapString("--- View ---", lx, ly);
 		ly += lineH;
@@ -1110,9 +1193,13 @@ void ofApp::drawVisuals() {
 		ly += lineH;
 		ofDrawBitmapString("  Shift+drag  Marquee zoom", lx, ly);
 		ly += lineH;
-		ofDrawBitmapString("  m     Toggle video view", lx, ly);
+		ofDrawBitmapString("  m       Toggle video view", lx, ly);
 		ly += lineH;
-		ofDrawBitmapString("  t     Toggle text labels", lx, ly);
+		ofDrawBitmapString("  Shift+m Toggle video triggering on selected path", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  ;       Lock/Unlock new video triggers", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  t       Toggle text labels", lx, ly);
 		ly += lineH;
 		ofDrawBitmapString("  d     Toggle debug info", lx, ly);
 		ly += lineH;
@@ -1188,6 +1275,26 @@ void ofApp::keyPressed(int key) {
 		}
 		break;
 
+	case CMD_TOGGLE_GLOBAL_PLAYBACK: // Return/Enter
+	{
+		bool anyPlaying = false;
+		for (auto & p : paths) {
+			if (p->isActive) {
+				anyPlaying = true;
+				break;
+			}
+		}
+
+		for (auto & p : paths) {
+			if (anyPlaying) {
+				p->isActive = false;
+				stopPathSamples(p);
+			} else {
+				p->isActive = true;
+			}
+		}
+	} break;
+
 	case CMD_LOAD_POINTS: // 'o'
 	{
 		ofFileDialogResult result = ofSystemLoadDialog("Select JSON Data or Composition File");
@@ -1202,7 +1309,7 @@ void ofApp::keyPressed(int key) {
 		// If user cancels, it might return empty or the original. We will assume if they entered something we use it.
 		// Actually, ofSystemTextBoxDialog returns the entered string, or empty if cancelled/empty.
 		compositionTitle = newTitle;
-		ofFileDialogResult result = ofSystemSaveDialog("composition.json", "Save Composition As");
+		ofFileDialogResult result = ofSystemSaveDialog("konvolute-01.json", "Save Konvolute As");
 		if (result.bSuccess) {
 			saveComposition(result.getPath());
 		}
@@ -1249,6 +1356,21 @@ void ofApp::keyPressed(int key) {
 		showTitle = !showTitle;
 		break;
 
+	case CMD_TOGGLE_PINGPONG:
+		if (selectedPath) {
+			selectedPath->isPingPong = !selectedPath->isPingPong;
+		} else if (currentPath) {
+			currentPath->isPingPong = !currentPath->isPingPong;
+		}
+		break;
+
+	case CMD_TOGGLE_JITTER:
+		if (selectedPath) {
+			selectedPath->jitterMode = !selectedPath->jitterMode;
+			ofLogNotice("ofApp") << "Jitter mode for path " << selectedPath->name << " set to: " << (selectedPath->jitterMode ? "ON" : "OFF");
+		}
+		break;
+
 	case CMD_TOGGLE_SETTINGS:
 		showGui = !showGui;
 		break;
@@ -1291,10 +1413,33 @@ void ofApp::keyPressed(int key) {
 		break;
 
 	case CMD_DECREASE_VOLUME: // 'V'
-		if (selectedPath) {
-			selectedPath->volume -= 0.1f;
-			if (selectedPath->volume < 0) selectedPath->volume = 0;
+	{
+		auto targetPath = selectedPath ? selectedPath : (!paths.empty() ? paths[0] : nullptr);
+		if (targetPath) {
+			targetPath->volume -= 0.1f;
+			if (targetPath->volume < 0.0f) targetPath->volume = 0.0f;
 		}
+	} break;
+
+	case CMD_TOGGLE_PATH_VIDEO:
+		if (selectedPath) {
+			selectedPath->sendToVideo = !selectedPath->sendToVideo;
+			ofLogNotice("ofApp") << "Selected path " << selectedPath->name << " video routing set to: " << (selectedPath->sendToVideo ? "ON" : "OFF");
+		} else {
+			// Find path-0 and toggle it
+			for (auto & p : paths) {
+				if (p->name == "path-0") {
+					p->sendToVideo = !p->sendToVideo;
+					ofLogNotice("ofApp") << "Browse path " << p->name << " video routing set to: " << (p->sendToVideo ? "ON" : "OFF");
+					break;
+				}
+			}
+		}
+		break;
+
+	case CMD_TOGGLE_VIDEO_LOCK: // ';'
+		videoTriggerLocked = !videoTriggerLocked;
+		ofLogNotice("ofApp") << "Video trigger locked set to: " << (videoTriggerLocked ? "ON" : "OFF");
 		break;
 
 	case CMD_DESELECT_PATH: // 'c'
@@ -1323,6 +1468,7 @@ void ofApp::keyPressed(int key) {
 		// Create new path
 		auto newPath = std::make_shared<PathObject>(pathIdCounter++);
 		newPath->name = "seq-" + ofToString(newPath->id);
+		newPath->mode = defaultPathMode;
 		newPath->isSequential = true;
 		newPath->radius = 1.0f; // Minimal radius as we use step logic
 
@@ -1360,6 +1506,17 @@ void ofApp::keyPressed(int key) {
 		selectedPath = nullptr;
 		if (spatialGrid) spatialGrid->clear();
 		oscManager.sendClear();
+
+		// Restore path-0
+		{
+			auto p0 = std::make_shared<PathObject>(0);
+			p0->name = "path-0";
+			p0->mode = defaultPathMode;
+			p0->isActive = false;
+			p0->sendToVideo = false;
+			oscManager.sendUIPathAdd(p0->name);
+			paths.push_back(p0);
+		}
 		break;
 
 	case CMD_RESET_ZOOM: // 'z' — zoom to extents of loaded points
@@ -1413,6 +1570,21 @@ void ofApp::keyPressed(int key) {
 		showHelp = !showHelp;
 		break;
 
+	case CMD_TOGGLE_DEFAULT_MODE:
+		if (defaultPathMode == PathObject::ONCE_MODE) {
+			defaultPathMode = PathObject::LOOP_MODE;
+		} else {
+			defaultPathMode = PathObject::ONCE_MODE;
+		}
+		if (!paths.empty()) {
+			paths[0]->mode = defaultPathMode;
+			oscManager.sendUIPathUpdate(paths[0]->id, paths[0]->isActive,
+				paths[0]->radius, paths[0]->direction, paths[0]->sampleNum,
+				paths[0]->volume, paths[0]->falloff, paths[0]->speed, paths[0]->mode);
+		}
+		ofLogNotice("ofApp") << "Default Path Mode toggled to: " << (defaultPathMode == PathObject::LOOP_MODE ? "LOOP" : "ONCE");
+		break;
+
 	default:
 		// Plus / Minus for SampleNum
 		if ((key == '+' || key == '=') && selectedPath) {
@@ -1423,9 +1595,16 @@ void ofApp::keyPressed(int key) {
 		}
 
 		// Handle arrow keys manually
-		if (key == OF_KEY_UP && selectedPath && !ofGetKeyPressed(OF_KEY_SHIFT)) {
-			// Previous behavior: increment sampleNum?
-			selectedPath->sampleNum++;
+		if (!ofGetKeyPressed(OF_KEY_SHIFT)) {
+			auto targetPath = selectedPath ? selectedPath : (!paths.empty() ? paths[0] : nullptr);
+			if (targetPath) {
+				if (key == OF_KEY_UP) {
+					targetPath->speed += 0.1f;
+				} else if (key == OF_KEY_DOWN) {
+					targetPath->speed -= 0.1f;
+					if (targetPath->speed < 0.0f) targetPath->speed = 0.0f;
+				}
+			}
 		}
 
 		// Path Cycling (Shift + Arrow)
@@ -1485,6 +1664,7 @@ void ofApp::mousePressed(int x, int y, int button) {
 	if (currentMode == DRAW_FREEHAND) {
 		if (!isDrawingPath) {
 			currentPath = std::make_shared<PathObject>(pathIdCounter++);
+			currentPath->mode = defaultPathMode;
 			isDrawingPath = true;
 		}
 		currentPath->addPoint(worldPos);
@@ -1493,6 +1673,7 @@ void ofApp::mousePressed(int x, int y, int button) {
 		if (ofGetKeyPressed(OF_KEY_ALT) && selectedPath) {
 			selectedPath->gesturePoints.clear();
 			selectedPath->hasGesture = false;
+			selectedPath->gestureStartTime = ofGetElapsedTimeMillis();
 			isRecordingGesture = true;
 			return;
 		}
@@ -1598,26 +1779,38 @@ void ofApp::mouseDragged(int x, int y, int button) {
 			lastMouse.set(x, y);
 			return; // handled
 		}
-
-		if (bHoldingV) {
+	}
+	// bHoldingV can apply to selectedPath or default path-0
+	if (bHoldingV) {
+		if (selectedPath) {
 			float deltaY = lastMouse.y - y;
 			selectedPath->speed += deltaY * 0.01f;
-			// Limit speed intuitively
 			if (selectedPath->speed < 0.0f) selectedPath->speed = 0.0f;
 
 			oscManager.sendUIPathUpdate(selectedPath->id, selectedPath->isActive,
 				selectedPath->radius, selectedPath->direction, selectedPath->sampleNum,
 				selectedPath->volume, selectedPath->falloff, selectedPath->speed, selectedPath->mode);
+		} else if (!paths.empty()) {
+			auto targetPath = paths[0];
+			float deltaY = lastMouse.y - y;
+			targetPath->volume += deltaY * 0.01f;
+			if (targetPath->volume < 0.0f) targetPath->volume = 0.0f;
+			if (targetPath->volume > 5.0f) targetPath->volume = 5.0f; // Limit max volume to avoid blowout
 
-			lastMouse.set(x, y);
-			return; // handled
+			oscManager.sendUIPathUpdate(targetPath->id, targetPath->isActive,
+				targetPath->radius, targetPath->direction, targetPath->sampleNum,
+				targetPath->volume, targetPath->falloff, targetPath->speed, targetPath->mode);
 		}
+		lastMouse.set(x, y);
+		return; // handled
 	}
+
 	// Allow gesture recording even in BROWSE mode (before the early return)
 	if (ofGetKeyPressed(OF_KEY_ALT) && selectedPath && isRecordingGesture) {
 		float scrubPos = std::clamp((float)x / (float)ofGetWidth(), 0.0f, 1.0f);
 		float vol = std::clamp(ofMap((float)y, (float)ofGetHeight(), 0.f, 0.f, 1.f), 0.f, 1.f);
-		selectedPath->gesturePoints.push_back({ scrubPos, vol });
+		long timeMs = ofGetElapsedTimeMillis() - selectedPath->gestureStartTime;
+		selectedPath->gesturePoints.push_back({ scrubPos, vol, timeMs });
 		selectedPath->position = scrubPos; // live preview during record
 		return;
 	}
@@ -1653,7 +1846,8 @@ void ofApp::mouseDragged(int x, int y, int button) {
 
 		if (isRecordingGesture) {
 			// Accumulate gesture point
-			selectedPath->gesturePoints.push_back({ scrubPos, vol });
+			long timeMs = ofGetElapsedTimeMillis() - selectedPath->gestureStartTime;
+			selectedPath->gesturePoints.push_back({ scrubPos, vol, timeMs });
 		} else {
 			// Classic scrub: update volume live
 			float prevVol = selectedPath->volume;
@@ -1935,6 +2129,8 @@ void ofApp::sendOscMessage(string addr, float val) {
 }
 
 void ofApp::triggerVideo(const DataPoint & p) {
+	if (videoTriggerLocked) return;
+
 	// Rate limited video switching
 	long now = ofGetElapsedTimeMillis();
 	if (now - lastVideoSwitchTime > 50) { // 50ms limit
@@ -1960,14 +2156,18 @@ void ofApp::triggerVideo(const DataPoint & p) {
 		ofFile vFile(videoPath);
 		string currentPath = videoFront->isLoaded() ? videoFront->getMoviePath() : "";
 		if (vFile.exists() && currentPath != videoPath) {
-			// Swap: old front keeps running as back — no reload, no flash
-			std::swap(videoFront, videoBack);
-			videoFront->load(videoPath);
-			videoFront->setLoopState(OF_LOOP_NORMAL); // always loop so clip never stops
-			videoFront->play();
-			videoFront->setVolume(0);
-			videoAlpha = 0.0f;
-			videoAlphaTarget = 255.0f;
+			if (videoDisplayMode.get() == 0) {
+				// Swap: old front keeps running as back — no reload, no flash
+				std::swap(videoFront, videoBack);
+				videoFront->load(videoPath);
+				videoFront->setLoopState(OF_LOOP_NORMAL); // always loop so clip never stops
+				videoFront->play();
+				videoFront->setVolume(0);
+				videoAlpha = 0.0f;
+				videoAlphaTarget = 255.0f;
+			} else {
+				videoQueue.push_back(videoPath);
+			}
 		}
 	}
 }
@@ -2001,8 +2201,11 @@ void ofApp::sendFullUIUpdate(std::shared_ptr<PathObject> p) {
 std::shared_ptr<PathObject> ofApp::createWanderingPath(
 	const DataPoint & start, int maxPoints, float randomness, int numNeighbors) {
 	auto newPath = std::make_shared<PathObject>(pathIdCounter++);
+	newPath->isWander = true;
+	newPath->mode = defaultPathMode;
 
 	// Add start directly to the polyline as a straight-line segment
+	newPath->controlPoints.push_back(ofVec2f(start.x, start.y));
 	newPath->polyline.addVertex(start.x, start.y, 0);
 
 	// Track visited; track current position as floats
@@ -2037,6 +2240,7 @@ std::shared_ptr<PathObject> ofApp::createWanderingPath(
 		}
 
 		// Add straight-line vertex to path
+		newPath->controlPoints.push_back(ofVec2f(next->x, next->y));
 		newPath->polyline.addVertex(next->x, next->y, 0);
 		visited.insert(*next);
 		cx = next->x;
@@ -2085,6 +2289,8 @@ void ofApp::saveComposition(string filepath) {
 		pathJson["falloff"] = p->falloff;
 		pathJson["mode"] = p->mode;
 		pathJson["is_sequential"] = p->isSequential;
+		pathJson["is_wander"] = p->isWander;
+		pathJson["send_video"] = p->sendToVideo;
 
 		// Save control points (the actual drawn/generated vertices)
 		ofxJSONElement cpArray;
@@ -2107,6 +2313,22 @@ void ofApp::saveComposition(string filepath) {
 				seqArray.append(sq);
 			}
 			pathJson["sequential_points"] = seqArray;
+		}
+
+		// Save gesture points if applicable
+		if (p->hasGesture && !p->gesturePoints.empty()) {
+			pathJson["has_gesture"] = true;
+			ofxJSONElement gArray;
+			for (int j = 0; j < p->gesturePoints.size(); ++j) {
+				ofxJSONElement g;
+				g["position"] = p->gesturePoints[j].position;
+				g["volume"] = p->gesturePoints[j].volume;
+				g["timeMs"] = (Json::Int64)p->gesturePoints[j].timeMs;
+				gArray.append(g);
+			}
+			pathJson["gesture_points"] = gArray;
+		} else {
+			pathJson["has_gesture"] = false;
 		}
 
 		pathsArray.append(pathJson);
@@ -2171,6 +2393,15 @@ void ofApp::loadCompositionOrPoints(string filepath) {
 		oscManager.sendReset(); // Notify SuperCollider of standard reset
 		oscManager.sendClear(); // Tell UI/SC to clear visuals/synths
 
+		// Restore path-0 immediately
+		auto p0 = std::make_shared<PathObject>(0);
+		p0->name = "path-0";
+		p0->mode = defaultPathMode;
+		p0->isActive = false;
+		p0->sendToVideo = false;
+		oscManager.sendUIPathAdd(p0->name);
+		paths.push_back(p0);
+
 		// 3. Restore settings
 		if (root.isMember("settings")) {
 			zoom = root["settings"]["zoom"].asFloat();
@@ -2186,7 +2417,8 @@ void ofApp::loadCompositionOrPoints(string filepath) {
 				// Reconstruct PathObject
 				auto newPath = std::make_shared<PathObject>(pathIdCounter++);
 				newPath->name = pJson["name"].asString();
-				newPath->isActive = pJson["is_active"].asBool();
+				newPath->isActive = false; // User requested paths not playing by default on load
+				// (We could read but ignore pJson["is_active"].asBool())
 				newPath->radius = pJson["radius"].asFloat();
 				newPath->speed = pJson["speed"].asFloat();
 
@@ -2197,6 +2429,8 @@ void ofApp::loadCompositionOrPoints(string filepath) {
 				if (pJson.isMember("falloff")) newPath->falloff = pJson["falloff"].asFloat();
 				if (pJson.isMember("mode")) newPath->mode = pJson["mode"].asInt();
 				if (pJson.isMember("is_sequential")) newPath->isSequential = pJson["is_sequential"].asBool();
+				if (pJson.isMember("is_wander")) newPath->isWander = pJson["is_wander"].asBool();
+				if (pJson.isMember("send_video")) newPath->sendToVideo = pJson["send_video"].asBool();
 
 				// Reconstruct control points
 				if (pJson.isMember("control_points") && pJson["control_points"].isArray()) {
@@ -2205,7 +2439,7 @@ void ofApp::loadCompositionOrPoints(string filepath) {
 						ofVec2f pt(cpArray[j]["x"].asFloat(), cpArray[j]["y"].asFloat());
 						newPath->addPoint(pt);
 					}
-					if (!newPath->isSequential) { // Normal drawn paths need finalization
+					if (!newPath->isSequential && !newPath->isWander) { // Normal drawn paths need finalization (smoothing)
 						newPath->finalize();
 					}
 				}
@@ -2219,6 +2453,22 @@ void ofApp::loadCompositionOrPoints(string filepath) {
 						dp.y = seqArray[j]["y"].asFloat();
 						dp.filename = seqArray[j]["filename"].asString();
 						newPath->sequentialPoints.push_back(dp);
+					}
+				}
+
+				// Reconstruct gesture points (if applicable)
+				if (pJson.isMember("has_gesture") && pJson["has_gesture"].asBool()) {
+					if (pJson.isMember("gesture_points") && pJson["gesture_points"].isArray()) {
+						newPath->hasGesture = true;
+						const ofxJSONElement & gArray = pJson["gesture_points"];
+						for (int j = 0; j < gArray.size(); ++j) {
+							PathObject::GesturePoint gp;
+							gp.position = gArray[j]["position"].asFloat();
+							gp.volume = gArray[j]["volume"].asFloat();
+							// Default timeMs to 0 for older un-versioned saves to avoid crash, but they won't playback dynamically
+							gp.timeMs = gArray[j].isMember("timeMs") ? gArray[j]["timeMs"].asInt64() : 0;
+							newPath->gesturePoints.push_back(gp);
+						}
 					}
 				}
 

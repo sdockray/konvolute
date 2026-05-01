@@ -17,8 +17,12 @@ AppCommand InputManager::getCommandForKey(int key) {
 		return CMD_MODE_DRAW;
 	case ' ':
 		return CMD_TOGGLE_PLAYBACK;
+	case OF_KEY_RETURN:
+		return CMD_TOGGLE_GLOBAL_PLAYBACK;
 	case 'm':
 		return CMD_TOGGLE_VIDEO;
+	case 'M':
+		return CMD_TOGGLE_PATH_VIDEO;
 	case 'o':
 		return CMD_LOAD_POINTS;
 	case 'x':
@@ -54,6 +58,9 @@ AppCommand InputManager::getCommandForKey(int key) {
 	case OF_KEY_DEL:
 	case OF_KEY_BACKSPACE:
 		return CMD_DELETE_PATH;
+	case 'l':
+	case 'L':
+		return CMD_TOGGLE_DEFAULT_MODE;
 	case 'q':
 	case 'Q':
 		return CMD_CREATE_SEQUENTIAL_PATH;
@@ -75,6 +82,14 @@ AppCommand InputManager::getCommandForKey(int key) {
 	case 'i':
 	case 'I':
 		return CMD_TOGGLE_TITLE;
+	case 'y':
+	case 'Y':
+		return CMD_TOGGLE_PINGPONG;
+	case ';':
+		return CMD_TOGGLE_VIDEO_LOCK;
+	case 'j':
+	case 'J':
+		return CMD_TOGGLE_JITTER;
 	default:
 		return CMD_NONE;
 	}

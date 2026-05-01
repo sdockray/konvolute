@@ -1,22 +1,32 @@
 <?xml version="1.0"?>
 <Visual_Settings>
 	<Background>5, 0, 4, 255</Background>
-	<Point_Color>255, 247, 250, 255</Point_Color>
+	<Point_Color>202, 176, 255, 245</Point_Color>
 	<Selected_Color>255, 100, 100, 255</Selected_Color>
 	<Hovered_Color>255, 255, 100, 255</Hovered_Color>
-	<Path_Color>255, 0, 144, 255</Path_Color>
-	<Active_Path_Color>255, 255, 0, 255</Active_Path_Color>
+	<Path_Color>255, 0, 144, 238</Path_Color>
+	<Active_Path_Color>255, 255, 0, 50</Active_Path_Color>
 	<Active_Point_Color>255, 255, 255, 255</Active_Point_Color>
-	<Text_Color>255, 255, 255, 255</Text_Color>
+	<Text_Color>255, 38, 48, 255</Text_Color>
 	<Active_Text_Color>0, 255, 0, 255</Active_Text_Color>
-	<Point_Size>7.93</Point_Size>
+	<Point_Size>10.405</Point_Size>
 	<Sel_Point_Size>1</Sel_Point_Size>
 	<Hover_Point_Size>2.755</Hover_Point_Size>
 	<Font_Size>9</Font_Size>
 	<Active_Font_Size>29.2</Active_Font_Size>
-	<Playhead_Size>2.99</Playhead_Size>
-	<Playhead_Color>244, 151, 255, 255</Playhead_Color>
-	<Video_Fade_Speed>14.97</Video_Fade_Speed>
+	<Playhead_Size>8.96</Playhead_Size>
+	<Playhead_Color>253, 253, 253, 255</Playhead_Color>
+	<Video_Fade_Speed>2.475</Video_Fade_Speed>
 	<Title_Color>255, 249, 242, 255</Title_Color>
-	<Title_Font_Size>53.58</Title_Font_Size>
+	<Title_Font_Size>41.7</Title_Font_Size>
+	<Video_Display_Layout>0</Video_Display_Layout>
+	<Watercolor_BlendMode>0</Watercolor_BlendMode>
+	<Watercolor_Decay>133</Watercolor_Decay>
+	<Path_Thickness>3.3835</Path_Thickness>
+	<Selected_Path_Thickness>3.682</Selected_Path_Thickness>
+	<Debug_Text_Color>255, 255, 255, 255</Debug_Text_Color>
+	<Macroblock_Size>8</Macroblock_Size>
+	<Macro_Threshold>0.035</Macro_Threshold>
+	<Datamosh_Decay>0.19145</Datamosh_Decay>
+	<Datamosh_Search>2</Datamosh_Search>
 </Visual_Settings>

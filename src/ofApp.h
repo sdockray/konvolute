@@ -8,6 +8,12 @@
 #include "ofMain.h"
 #include "ofxGui.h"
 #include "ofxOsc.h"
+#include <deque>
+
+enum DisplayMode {
+	DEFAULT_MODE = 0,
+	GRID_MODE = 1
+};
 
 class ofApp : public ofBaseApp {
 
@@ -50,6 +56,7 @@ public:
 	int pathIdCounter;
 	bool bHoldingR = false;
 	bool bHoldingV = false;
+	int defaultPathMode = 3; // Starts at ONCE_MODE
 
 	// View
 	float zoom;
@@ -93,6 +100,7 @@ public:
 	float videoAlphaTarget;
 	float videoFadeSpeed;
 	bool showVideo;
+	bool videoTriggerLocked = false;
 	bool showText;
 	bool showTitle;
 	string compositionTitle;
@@ -102,6 +110,21 @@ public:
 	long lastVideoSwitchTime;
 	string mediaRoot;
 	string lastAttemptedVideoPath;
+
+	// Grid Mode State
+	const int GRID_COLS = 4;
+	const int GRID_ROWS = 3;
+	std::vector<std::shared_ptr<ofVideoPlayer>> gridPlayers;
+	std::deque<string> videoQueue;
+
+	// Datamosh Mode State
+	struct MotionVector {
+		int dx, dy;
+	};
+	ofPixels macroblockFrozenPixels;
+	ofPixels macroblockPrevPixels;
+	ofTexture macroblockTexture;
+	bool inDatamoshTransition = false;
 
 	// GUI & Settings
 	ofxPanel gui;
@@ -116,6 +139,7 @@ public:
 	ofParameter<ofColor> textColor;
 	ofParameter<ofColor> activeTextColor;
 	ofParameter<ofColor> titleColor;
+	ofParameter<ofColor> debugTextColor;
 
 	ofParameter<float> pointSize;
 	ofParameter<float> selectedPointSize;
@@ -124,9 +148,17 @@ public:
 	ofParameter<float> activeFontSize;
 	ofParameter<float> titleFontSize;
 	ofParameter<float> playheadSize;
+	ofParameter<float> pathThickness;
+	ofParameter<float> selectedPathThickness;
 	ofParameter<ofColor> playheadColor;
 	ofParameter<int> videoFitMode; // 0=stretch 1=fit-height 2=fit-width
 	ofParameter<float> videoFadeSpeed_param; // crossfade speed (alpha/frame)
+
+	ofParameter<int> videoDisplayMode; // 0=default, 1=grid, 2=datamosh
+	ofParameter<int> macroblockSize;
+	ofParameter<float> macroblockThreshold;
+	ofParameter<float> datamoshDecay;
+	ofParameter<int> datamoshSearchRadius;
 
 	// Fonts
 	ofTrueTypeFont font;

@@ -43,6 +43,7 @@ public:
 
 	// Core Data
 	std::vector<DataPoint> points;
+	std::map<int, ClusterInfo> clusters;
 	std::shared_ptr<SpatialGrid> spatialGrid;
 
 	// Path System

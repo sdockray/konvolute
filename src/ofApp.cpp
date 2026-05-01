@@ -2042,13 +2042,21 @@ bool ofApp::loadPoints(string jsonPath) {
 
 	ofxJSONElement json;
 	if (json.open(jsonPath)) {
-		if (!json.isArray()) {
-			ofLogError("ofApp::loadPoints") << "Error: Expected JSON array of points, but got an object. Did you select a composition file?";
+		bool isLegacyArray = json.isArray();
+		if (!json.isObject() && !isLegacyArray) {
+			ofLogError("ofApp::loadPoints") << "Error: Expected JSON object with 'points' and 'clusters', or legacy array.";
 			ofSystemAlertDialog("The selected file is not a valid points file.\nPlease ensure you select the raw points JSON and not a composition file.");
 			return false;
 		}
 
+		// Ensure it is not a composition file (which has "points_file")
+		if (json.isObject() && json.isMember("points_file")) {
+			ofLogError("ofApp::loadPoints") << "Error: Attempted to load composition file as raw points data.";
+			return false;
+		}
+
 		points.clear();
+		clusters.clear();
 
 		ofLogNotice("ofApp::loadPoints") << "Loading points from " << jsonPath;
 
@@ -2069,18 +2077,74 @@ bool ofApp::loadPoints(string jsonPath) {
 		float minY = std::numeric_limits<float>::max();
 		float maxY = std::numeric_limits<float>::lowest();
 
-		for (int i = 0; i < json.size(); ++i) {
-			float x = json[i]["x"].asFloat();
-			float y = json[i]["y"].asFloat();
-			string file = json[i].isMember("file") ? json[i]["file"].asString() : (json[i].isMember("filename") ? json[i]["filename"].asString() : "");
-			string text = json[i].isMember("text") ? json[i]["text"].asString() : "";
+		const Json::Value* pointsJson = nullptr;
 
-			points.emplace_back(x, y, file, text);
+		if (isLegacyArray) {
+			pointsJson = &json;
+		} else {
+			if (json.isMember("clusters")) {
+				std::vector<std::string> clusterKeys = json["clusters"].getMemberNames();
+				for (size_t i = 0; i < clusterKeys.size(); ++i) {
+					const Json::Value& c = json["clusters"][clusterKeys[i]];
+					ClusterInfo ci;
+					ci.id = c["id"].asInt();
+					ci.label = c["label"].asString();
+					ci.member_count = c["member_count"].asInt();
+					clusters[ci.id] = ci;
+				}
+			}
+			if (json.isMember("points")) {
+				pointsJson = &json["points"];
+			}
+		}
 
-			if (x < minX) minX = x;
-			if (x > maxX) maxX = x;
-			if (y < minY) minY = y;
-			if (y > maxY) maxY = y;
+		if (pointsJson && pointsJson->isArray()) {
+			for (Json::ArrayIndex i = 0; i < pointsJson->size(); ++i) {
+				const Json::Value& pt = (*pointsJson)[i];
+				float x = pt["x"].asFloat();
+				float y = pt["y"].asFloat();
+				string filename = pt.isMember("file") ? pt["file"].asString() : (pt.isMember("filename") ? pt["filename"].asString() : "");
+				string text = pt.isMember("text") ? pt["text"].asString() : "";
+
+				DataPoint p(x, y, filename, text);
+
+				// Parse new fields
+				if (pt.isMember("pos_local") && pt["pos_local"].isArray()) {
+					p.pos_local.set(pt["pos_local"][0].asFloat(), pt["pos_local"][1].asFloat());
+				}
+				if (pt.isMember("pos_mid") && pt["pos_mid"].isArray()) {
+					p.pos_mid.set(pt["pos_mid"][0].asFloat(), pt["pos_mid"][1].asFloat());
+				} else {
+					p.pos_mid.set(x, y); // Default fallback
+				}
+				if (pt.isMember("pos_global") && pt["pos_global"].isArray()) {
+					p.pos_global.set(pt["pos_global"][0].asFloat(), pt["pos_global"][1].asFloat());
+				}
+
+				if (pt.isMember("instability")) p.instability = pt["instability"].asFloat();
+				if (pt.isMember("cluster_id")) p.cluster_id = pt["cluster_id"].asInt();
+				if (pt.isMember("cluster_membership")) p.cluster_membership = pt["cluster_membership"].asFloat();
+				if (pt.isMember("attack")) p.attack = pt["attack"].asFloat();
+				if (pt.isMember("brightness")) p.brightness = pt["brightness"].asFloat();
+
+				if (pt.isMember("true_neighbors") && pt["true_neighbors"].isArray()) {
+					for (Json::ArrayIndex j = 0; j < pt["true_neighbors"].size(); ++j) {
+						p.true_neighbors.push_back(pt["true_neighbors"][j].asInt());
+					}
+				}
+				if (pt.isMember("true_distances") && pt["true_distances"].isArray()) {
+					for (Json::ArrayIndex j = 0; j < pt["true_distances"].size(); ++j) {
+						p.true_distances.push_back(pt["true_distances"][j].asFloat());
+					}
+				}
+
+				points.push_back(p);
+
+				if (x < minX) minX = x;
+				if (x > maxX) maxX = x;
+				if (y < minY) minY = y;
+				if (y > maxY) maxY = y;
+			}
 		}
 
 		ofLogNotice("ofApp::loadPoints") << "Loaded " << points.size() << " points.";

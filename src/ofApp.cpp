@@ -66,6 +66,9 @@ void ofApp::setup() {
 	isDrawingPath = false;
 	zoom = 1.0f;
 	pan.set(0, 0);
+	targetZoom = zoom;
+	targetPan = pan;
+	isViewAnimating = false;
 	isDragging = false;
 	isMarqueeZooming = false;
 	isRecordingGesture = false;
@@ -102,14 +105,18 @@ void ofApp::setup() {
 	params.add(selectedPointSize.set("Sel Point Size", 8.0f, 1.0f, 30.0f));
 	params.add(hoveredPointSize.set("Hover Point Size", 16.0f, 1.0f, 40.0f));
 	params.add(fontSize.set("Font Size", 14.0f, 8.0f, 48.0f));
+	params.add(annotationFontSize.set("Annotation Font Size", 14.0f, 8.0f, 48.0f));
 	params.add(activeFontSize.set("Active Font Size", 14.0f, 8.0f, 48.0f));
 	params.add(titleFontSize.set("Title Font Size", 48.0f, 12.0f, 120.0f));
+	params.add(gridColor.set("Grid Color", ofColor(120, 140, 170, 70), ofColor(0, 0, 0, 0), ofColor(255, 255, 255, 255)));
+	params.add(gridSpacing.set("Grid Spacing", 2.0f, 0.2f, 20.0f));
+	params.add(zoomAnimationSpeed.set("Zoom Animation Speed", 0.2f, 0.02f, 1.0f));
 	params.add(playheadSize.set("Playhead Size", 5.0f, 1.0f, 200.0f));
 	params.add(pathThickness.set("Path Thickness", 1.0f, 0.1f, 20.0f));
 	params.add(selectedPathThickness.set("Selected Path Thickness", 2.0f, 0.1f, 20.0f));
 	params.add(playheadColor.set("Playhead Color", ofColor(255), ofColor(0, 0), ofColor(255, 255)));
 	params.add(videoFitMode.set("Video Fit 0=stretch 1=height 2=width", 0, 0, 2));
-	params.add(videoDisplayMode.set("Video Mode 0=default, 1=grid", 0, 0, 1));
+	params.add(videoDisplayMode.set("Video Mode 0=single 1=grid 2=blendmix 3=mapped 4=collage", 0, 0, 4));
 	params.add(videoFadeSpeed_param.set("Video Fade Speed", 15.0f, 1.0f, 60.0f));
 	params.add(cloudTransitionSpeed.set("Cloud Transition Speed", 0.05f, 0.01f, 1.0f));
 	params.add(neighbourSeqGapMs_param.set("Neighbour Seq Gap (ms)", 300.0f, 50.0f, 2000.0f));
@@ -119,12 +126,35 @@ void ofApp::setup() {
 		gridPlayers.push_back(std::make_shared<ofVideoPlayer>());
 	}
 
+	// Initialize Ghost mode pool
+	for (int i = 0; i < kGhostLayers; i++) {
+		ghostPlayers.push_back(std::make_shared<ofVideoPlayer>());
+	}
+
+	// Initialize Mapped mode pool (reused to avoid runtime player churn)
+	for (int i = 0; i < kMappedMax; i++) {
+		MappedClip mc;
+		mc.player = std::make_shared<ofVideoPlayer>();
+		mappedPlayers.push_back(mc);
+	}
+
+	// Initialize Tile Collage mode layers
+	int collageCount = kCollageCols * kCollageRows;
+	collagePlayers.reserve(collageCount);
+	collageAnglesDeg.assign(collageCount, 0.0f);
+	collageOffsetsPx.assign(collageCount, ofVec2f(0, 0));
+	for (int i = 0; i < collageCount; i++) {
+		collagePlayers.push_back(std::make_shared<ofVideoPlayer>());
+	}
+
 	gui.setup(params);
 	gui.loadFromFile("settings.xml");
 
 	// Load Font - try to load a system font or default
 	bool fontLoaded = font.load("verdana.ttf", fontSize);
 	if (!fontLoaded) fontLoaded = font.load(OF_TTF_SANS, fontSize);
+	bool annotationFontLoaded = annotationFont.load("verdana.ttf", annotationFontSize);
+	if (!annotationFontLoaded) annotationFontLoaded = annotationFont.load(OF_TTF_SANS, annotationFontSize);
 
 	bool activeFontLoaded = activeFont.load("verdana.ttf", activeFontSize);
 	if (!activeFontLoaded) activeFontLoaded = activeFont.load(OF_TTF_SANS, activeFontSize);
@@ -143,10 +173,35 @@ void ofApp::setup() {
 		loadPoints(dir.getPath(0));
 	}
 	*/
+
+	// Annotation system — loadFromFile is deferred to loadPoints() so that
+	// annotations are never drawn against an empty point cloud on startup.
+	annotationManager.init(&zoom, &pan, &annotationFont);
 }
 
 //--------------------------------------------------------------
 void ofApp::update() {
+	// Fade point/path visuals independently from video playback.
+	float fadeStep = ofGetLastFrameTime() / 0.1f;
+	if (dataVisualAlpha < targetDataVisualAlpha) {
+		dataVisualAlpha = std::min(dataVisualAlpha + fadeStep, targetDataVisualAlpha);
+	} else if (dataVisualAlpha > targetDataVisualAlpha) {
+		dataVisualAlpha = std::max(dataVisualAlpha - fadeStep, targetDataVisualAlpha);
+	}
+
+	// Smoothly animate zoom/pan towards targets.
+	if (isViewAnimating) {
+		float k = std::clamp((float)zoomAnimationSpeed.get(), 0.0f, 1.0f);
+		zoom = ofLerp(zoom, targetZoom, k);
+		pan = pan.getInterpolated(targetPan, k);
+
+		if (std::abs(zoom - targetZoom) < 0.0005f && pan.squareDistance(targetPan) < 0.01f) {
+			zoom = targetZoom;
+			pan = targetPan;
+			isViewAnimating = false;
+		}
+	}
+
 	// Poll OSC Messages
 	ofxOscMessage m;
 	while (oscManager.getNextMessage(m)) {
@@ -431,7 +486,15 @@ void ofApp::update() {
 
 	// Browse Mode Logic
 	if (currentMode == BROWSE && spatialGrid) {
-		if (ofGetMousePressed()) {
+		// While adjusting radius/speed with keyboard+drag, suppress browse triggering.
+		if (bHoldingR || bHoldingV) {
+			if (hasLastHoveredPoint) {
+				oscManager.stopSample(mediaRoot + lastHoveredPoint.filename, "path-0");
+				hasLastHoveredPoint = false;
+				hasHoveredPoint = false;
+			}
+		} else {
+			if (ofGetMousePressed()) {
 			ofVec2f worldPos = screenToWorld(ofGetMouseX(), ofGetMouseY());
 			std::vector<DataPoint> nearest = spatialGrid->findNearestNeighbors(worldPos.x, worldPos.y, 1);
 
@@ -478,20 +541,19 @@ void ofApp::update() {
 
 						oscManager.sendSample(mediaRoot + hoveredPoint.filename, "path-0", vol, mode);
 						// possibly trigger video
-						if (paths.size() > 0) {
-							if (showVideo && paths[0]->sendToVideo) triggerVideo(hoveredPoint);
-						}
+						if (showVideo) triggerVideo(hoveredPoint);
 						lastHoveredPoint = hoveredPoint;
 						hasLastHoveredPoint = true;
 					}
 				}
 			}
-		} else {
-			// Mouse not pressed - stop playing if we were
-			if (hasLastHoveredPoint) {
-				oscManager.stopSample(mediaRoot + lastHoveredPoint.filename, "path-0");
-				hasLastHoveredPoint = false;
-				hasHoveredPoint = false;
+			} else {
+				// Mouse not pressed - stop playing if we were
+				if (hasLastHoveredPoint) {
+					oscManager.stopSample(mediaRoot + lastHoveredPoint.filename, "path-0");
+					hasLastHoveredPoint = false;
+					hasHoveredPoint = false;
+				}
 			}
 		}
 	}
@@ -504,11 +566,22 @@ void ofApp::update() {
 			if (neighbourSeqIdx < (int)neighbourQueue.size()) {
 				int ptIdx = neighbourQueue[neighbourSeqIdx];
 				const DataPoint & np = points[ptIdx];
-				float vol = paths.empty() ? 0.5f : paths[0]->volume;
+				float baseVol = paths.empty() ? 0.5f : paths[0]->volume;
+				float volScale = 1.0f;
+				if (neighbourQueueDistances.size() == neighbourQueue.size() && !neighbourQueueDistances.empty()) {
+					float minD = *std::min_element(neighbourQueueDistances.begin(), neighbourQueueDistances.end());
+					float maxD = *std::max_element(neighbourQueueDistances.begin(), neighbourQueueDistances.end());
+					float range = std::max(maxD - minD, 1e-6f);
+					float d = neighbourQueueDistances[neighbourSeqIdx];
+					float nearWeight = 1.0f - ((d - minD) / range); // near=1, far=0
+					nearWeight = std::clamp(nearWeight, 0.0f, 1.0f);
+					volScale = ofLerp(0.2f, 1.0f, nearWeight); // far still audible
+				}
+				float vol = baseVol * volScale;
 				string mode = paths.empty() ? "once" : paths[0]->getMode();
 				oscManager.sendSample(mediaRoot + np.filename, "path-0", vol, mode);
 				// Trigger video if enabled
-				if (showVideo && !paths.empty() && paths[0]->sendToVideo) {
+				if (showVideo) {
 					triggerVideo(np);
 				}
 				// Record for line illumination
@@ -827,6 +900,44 @@ void ofApp::update() {
 				videoFront->draw(x, y, dw, dh);
 				videoHoldFbo.end();
 			}
+		} else if (videoDisplayMode.get() == 2) {
+			// GHOST MODE — update all active ghost layers
+			for (auto & gp : ghostPlayers) {
+				if (gp->isLoaded() && gp->isPlaying()) gp->update();
+			}
+		} else if (videoDisplayMode.get() == 3) {
+			// MAPPED MODE — update all active mapped clips
+			for (auto & mc : mappedPlayers) {
+				if (mc.player->isLoaded() && mc.player->isPlaying()) mc.player->update();
+			}
+		} else if (videoDisplayMode.get() == 4) {
+			// COLLAGE MODE
+			if (!videoQueue.empty() && !collagePlayers.empty()) {
+				string nextVideo = videoQueue.front();
+				videoQueue.pop_front();
+
+				int collageCount = (int)collagePlayers.size();
+				int tileIdx = (collageWriteCounter * 7) % collageCount; // 7 is coprime with 20
+				collageWriteCounter++;
+
+				auto & player = collagePlayers[tileIdx];
+				player->stop();
+				player->close();
+				player->load(nextVideo);
+				player->setLoopState(OF_LOOP_NORMAL);
+				player->play();
+				player->setVolume(0);
+
+				// Slight per-tile randomization for a photographic collage feel.
+				collageAnglesDeg[tileIdx] = ofRandom(-5.0f, 5.0f);
+				collageOffsetsPx[tileIdx] = ofVec2f(ofRandom(-10.0f, 10.0f), ofRandom(-10.0f, 10.0f));
+			}
+
+			for (auto & player : collagePlayers) {
+				if (player->isLoaded() && player->isPlaying()) {
+					player->update();
+				}
+			}
 		} else {
 			// GRID MODE
 
@@ -876,6 +987,9 @@ void ofApp::update() {
 			mouseActivePoints.clear();
 		}
 	}
+
+	// Update annotations (tracks anchor points each frame)
+	annotationManager.update(points);
 }
 
 //--------------------------------------------------------------
@@ -962,6 +1076,126 @@ void ofApp::drawVisuals() {
 					player->draw(x, y, dw, dh);
 				}
 			}
+		} else if (videoDisplayMode.get() == 2) {
+			// BLEND MIX MODE
+			// A controlled collage stack using alternating blend modes to avoid overexposure.
+			ofBackground(backgroundColor);
+
+			int n = (int)ghostPlayers.size();
+			for (int i = 0; i < n; ++i) {
+				auto & gp = ghostPlayers[i];
+				if (!gp->isLoaded() || gp->getWidth() <= 0) continue;
+
+				float vw = gp->getWidth(), vh = gp->getHeight();
+				float sw = (float)ofGetWidth(), sh = (float)ofGetHeight();
+				float x = 0, y = 0, dw = sw, dh = sh;
+				int fitMode = videoFitMode.get();
+				if (fitMode == 1 && vh > 0) {
+					dh = sh;
+					dw = (vw / vh) * sh;
+					x = (sw - dw) * 0.5f;
+					y = 0;
+				} else if (fitMode == 2 && vw > 0) {
+					dw = sw;
+					dh = (vh / vw) * sw;
+					x = 0;
+					y = (sh - dh) * 0.5f;
+				}
+
+				if (i == 0) {
+					// Newest layer as anchor image.
+					ofEnableBlendMode(OF_BLENDMODE_ALPHA);
+					ofSetColor(255, 255, 255, 210);
+				} else if (i % 3 == 1) {
+					ofEnableBlendMode(OF_BLENDMODE_MULTIPLY);
+					ofSetColor(255, 255, 255, 110);
+				} else if (i % 3 == 2) {
+					ofEnableBlendMode(OF_BLENDMODE_SCREEN);
+					ofSetColor(255, 255, 255, 70);
+				} else {
+					// Difference-like accent (subtractive) on occasional deeper layers.
+					ofEnableBlendMode(OF_BLENDMODE_SUBTRACT);
+					ofSetColor(255, 255, 255, 45);
+				}
+
+				gp->draw(x, y, dw, dh);
+			}
+
+			ofDisableBlendMode();
+			ofSetColor(255);
+		} else if (videoDisplayMode.get() == 3) {
+			// DATA-MAPPED MODE
+			// Each clip plays centred on the screen position of the data point that triggered it.
+			ofBackground(backgroundColor);
+			ofSetColor(255);
+			// Thumbnail height in world units — 15% of visible screen height.
+			float worldThumbH = (ofGetHeight() * 0.15f) / std::max(zoom, 0.001f);
+			float centerX = ofGetWidth()  * 0.5f;
+			float centerY = ofGetHeight() * 0.5f;
+			for (auto & mc : mappedPlayers) {
+				if (!mc.player->isLoaded() || mc.player->getWidth() <= 0) continue;
+				float sx = mc.point.x * zoom + pan.x + centerX;
+				float sy = mc.point.y * zoom + pan.y + centerY;
+				float vw = mc.player->getWidth(), vh = mc.player->getHeight();
+				float aspect = (vh > 0) ? vw / vh : 1.0f;
+				float screenH = worldThumbH * zoom;
+				float screenW = screenH * aspect;
+				mc.player->draw(sx - screenW * 0.5f, sy - screenH * 0.5f, screenW, screenH);
+			}
+			ofSetColor(255);
+		} else if (videoDisplayMode.get() == 4) {
+			// TILE COLLAGE MODE
+			ofBackground(backgroundColor);
+
+			float sw = (float)ofGetWidth();
+			float sh = (float)ofGetHeight();
+			float cellWidth = sw / kCollageCols;
+			float cellHeight = sh / kCollageRows;
+			float gutter = 8.0f;
+
+			for (int i = 0; i < (int)collagePlayers.size(); ++i) {
+				auto & player = collagePlayers[i];
+				if (!player->isLoaded() || player->getWidth() <= 0) continue;
+
+				int col = i % kCollageCols;
+				int row = i / kCollageCols;
+				float cx = col * cellWidth + gutter;
+				float cy = row * cellHeight + gutter;
+				float cw = cellWidth - (gutter * 2.0f);
+				float ch = cellHeight - (gutter * 2.0f);
+
+				float centerX = cx + (cw * 0.5f) + collageOffsetsPx[i].x;
+				float centerY = cy + (ch * 0.5f) + collageOffsetsPx[i].y;
+
+				float vw = player->getWidth(), vh = player->getHeight();
+				float x = -cw * 0.5f, y = -ch * 0.5f, dw = cw, dh = ch;
+				int fitMode = videoFitMode.get();
+				if (fitMode == 1 && vh > 0) {
+					dh = ch;
+					dw = (vw / vh) * ch;
+					x = -dw * 0.5f;
+					y = -dh * 0.5f;
+				} else if (fitMode == 2 && vw > 0) {
+					dw = cw;
+					dh = (vh / vw) * cw;
+					x = -dw * 0.5f;
+					y = -dh * 0.5f;
+				}
+
+				ofPushMatrix();
+				ofTranslate(centerX, centerY);
+				ofRotateDeg(collageAnglesDeg[i]);
+				ofSetColor(255);
+				player->draw(x, y, dw, dh);
+				// Thin matte border improves collage legibility.
+				ofNoFill();
+				ofSetColor(235, 235, 235, 180);
+				ofSetLineWidth(1.0f);
+				ofDrawRectangle(-cw * 0.5f, -ch * 0.5f, cw, ch);
+				ofFill();
+				ofPopMatrix();
+			}
+			ofSetColor(255);
 		}
 	} else {
 		ofBackground(backgroundColor);
@@ -969,10 +1203,45 @@ void ofApp::drawVisuals() {
 
 	ofEnableAlphaBlending();
 
+	// Draw grid above video and below points. We project world-grid lines into
+	// screen space so changing spacing is immediately visible.
+	{
+		float worldSpacing = std::max(0.1f, (float)gridSpacing.get());
+		ofColor gc = gridColor.get();
+		if (gc.a > 0 && !points.empty()) {
+			ofVec2f tl = screenToWorld(0, 0);
+			ofVec2f tr = screenToWorld(ofGetWidth(), 0);
+			ofVec2f bl = screenToWorld(0, ofGetHeight());
+			ofVec2f br = screenToWorld(ofGetWidth(), ofGetHeight());
+
+			float minWX = std::min(std::min(tl.x, tr.x), std::min(bl.x, br.x));
+			float maxWX = std::max(std::max(tl.x, tr.x), std::max(bl.x, br.x));
+			float minWY = std::min(std::min(tl.y, tr.y), std::min(bl.y, br.y));
+			float maxWY = std::max(std::max(tl.y, tr.y), std::max(bl.y, br.y));
+
+			float startWX = std::floor(minWX / worldSpacing) * worldSpacing;
+			float endWX = std::ceil(maxWX / worldSpacing) * worldSpacing;
+			float startWY = std::floor(minWY / worldSpacing) * worldSpacing;
+			float endWY = std::ceil(maxWY / worldSpacing) * worldSpacing;
+
+			ofSetColor(gc);
+			ofSetLineWidth(1.0f);
+			for (float wx = startWX; wx <= endWX; wx += worldSpacing) {
+				float sx = wx * zoom + pan.x + ofGetWidth() * 0.5f;
+				ofDrawLine(sx, 0.0f, sx, (float)ofGetHeight());
+			}
+			for (float wy = startWY; wy <= endWY; wy += worldSpacing) {
+				float sy = wy * zoom + pan.y + ofGetHeight() * 0.5f;
+				ofDrawLine(0.0f, sy, (float)ofGetWidth(), sy);
+			}
+		}
+	}
+
 	ofPushMatrix();
 	ofTranslate(ofGetWidth() / 2, ofGetHeight() / 2);
 	ofTranslate(pan);
 	ofScale(zoom, zoom);
+	float dataAlphaScale = std::clamp(dataVisualAlpha, 0.0f, 1.0f);
 
 	// Draw Points
 	ofFill(); // Ensure fill is enabled
@@ -990,7 +1259,7 @@ void ofApp::drawVisuals() {
 		if (activeClusterId != -999 && p.cluster_id != activeClusterId) {
 			alpha = baseAlpha * 0.15f; // 15% of normal
 		}
-		ofSetColor(c.r, c.g, c.b, (int)alpha);
+		ofSetColor(c.r, c.g, c.b, (int)(alpha * dataAlphaScale));
 
 		float scale = 1.0f;
 		if (currentThirdDimMode != ThirdDimMode::NONE) {
@@ -1050,11 +1319,11 @@ void ofApp::drawVisuals() {
 				if (idx == neighbourLastPlayedIdx && msSincePlayed < kNeighbourFlashMs) {
 					float flashT = 1.0f - ((float)msSincePlayed / (float)kNeighbourFlashMs);
 					// Blend line from flash-white toward the distance-tinted colour
-					int flashAlpha = (int)ofLerp(baseAlpha, 255.0f, flashT);
+					int flashAlpha = (int)(ofLerp(baseAlpha, 255.0f, flashT) * dataAlphaScale);
 					ofSetColor(255, 255, 255, flashAlpha); // bright white flash
 				} else {
 					// Normal: cool blue-white, opacity = proximity
-					ofSetColor(180, 210, 255, (int)baseAlpha);
+					ofSetColor(180, 210, 255, (int)(baseAlpha * dataAlphaScale));
 				}
 
 				ofDrawLine(sel.x, sel.y, np.x, np.y);
@@ -1065,7 +1334,7 @@ void ofApp::drawVisuals() {
 		}
 
 		// Draw selected point indicator: bright ring on top
-		ofSetColor(255, 255, 100, 230); // bright yellow
+		ofSetColor(255, 255, 100, (int)(230 * dataAlphaScale)); // bright yellow
 		ofNoFill();
 		ofSetLineWidth(2.0f);
 		ofDrawCircle(sel.x, sel.y, (pointSize / zoom) * 2.5f);
@@ -1075,19 +1344,39 @@ void ofApp::drawVisuals() {
 
 	// Draw Text
 	// Draw Paths
+	ofColor fadedPlayheadColor = playheadColor.get();
+	fadedPlayheadColor.a = (int)(fadedPlayheadColor.a * dataAlphaScale);
+	ofColor fadedPathColor = pathColor.get();
+	fadedPathColor.a = (int)(fadedPathColor.a * dataAlphaScale);
+	ofColor fadedSelectedPathColor = selectedPathColor.get();
+	fadedSelectedPathColor.a = (int)(fadedSelectedPathColor.a * dataAlphaScale);
 	for (auto & path : paths) {
-		path->draw(playheadSize / zoom, playheadColor.get(), zoom, pathThickness.get(), selectedPathThickness.get(), pathColor.get(), selectedPathColor.get());
+		path->draw(playheadSize / zoom, fadedPlayheadColor, zoom, pathThickness.get(), selectedPathThickness.get(), fadedPathColor, fadedSelectedPathColor);
 	}
 
 	// Draw current path
 	if (isDrawingPath && currentPath) {
-		ofSetColor(pathColor.get());
+		ofColor currentPathColor = pathColor.get();
+		currentPathColor.a = (int)(currentPathColor.a * dataAlphaScale);
+		ofSetColor(currentPathColor);
 		ofSetLineWidth(selectedPathThickness.get());
 		// Only draw the line, not the playhead circle
 		currentPath->polyline.draw();
 	}
 
 	ofPopMatrix();
+
+	// Update annotation font size if changed.
+	static float lastAnnotationFontSize = annotationFontSize;
+	if (std::abs(lastAnnotationFontSize - annotationFontSize.get()) > 0.5f) {
+		bool result = annotationFont.load("Futura.ttc", annotationFontSize);
+		if (!result) result = annotationFont.load("verdana.ttf", annotationFontSize);
+		if (!result) annotationFont.load(OF_TTF_SANS, annotationFontSize);
+		lastAnnotationFontSize = annotationFontSize;
+	}
+
+	// Draw annotations in screen space (above the point cloud)
+	annotationManager.draw(points, activeClusterId);
 
 	// ---- Screen-space overlays for selected path ----
 	if (selectedPath) {
@@ -1110,7 +1399,7 @@ void ofApp::drawVisuals() {
 		}
 		float crossSize = 10.0f;
 		ofColor phc = playheadColor.get();
-		ofSetColor(phc.r, phc.g, phc.b, 128); // 50% opacity
+		ofSetColor(phc.r, phc.g, phc.b, (int)(128 * dataAlphaScale)); // 50% opacity
 		ofSetLineWidth(2);
 		ofDrawLine(cx - crossSize, cy, cx + crossSize, cy);
 		ofDrawLine(cx, cy - crossSize, cx, cy + crossSize);
@@ -1126,7 +1415,7 @@ void ofApp::drawVisuals() {
 				float y0 = (1.0f - a.volume) * sh;
 				float x1 = b.position * sw;
 				float y1 = (1.0f - b.volume) * sh;
-				int alpha = (int)(a.volume * 135) + 120;
+				int alpha = (int)(((a.volume * 135) + 120) * dataAlphaScale);
 				ofSetColor(100, 255, 150, alpha);
 				ofDrawLine(x0, y0, x1, y1);
 			}
@@ -1136,7 +1425,9 @@ void ofApp::drawVisuals() {
 
 	// Draw Text (Screen Space)
 	if (showText) {
-		ofSetColor(textColor);
+		ofColor fadedTextColor = textColor.get();
+		fadedTextColor.a = (int)(fadedTextColor.a * dataAlphaScale);
+		ofSetColor(fadedTextColor);
 		if (font.isLoaded()) {
 			// Update font size if changed
 			static float lastFontSize = fontSize;
@@ -1209,31 +1500,6 @@ void ofApp::drawVisuals() {
 			ofSetColor(titleColor);
 
 			ofDrawBitmapString(compositionTitle, x, y);
-		}
-	}
-
-	// Draw active cluster label (screen-space, prominent)
-	if (activeClusterId != -999) {
-		std::string clusterLabel = "Cluster " + ofToString(activeClusterId);
-		if (clusters.count(activeClusterId) && !clusters[activeClusterId].label.empty()) {
-			clusterLabel = clusters[activeClusterId].label;
-		}
-		if (titleFont.isLoaded()) {
-			ofRectangle bounds = titleFont.getStringBoundingBox(clusterLabel, 0, 0);
-			float x = (ofGetWidth() - bounds.width) / 2.0f;
-			float y = ofGetHeight() - 60.0f;
-			ofSetColor(0, 0, 0, 150);
-			titleFont.drawString(clusterLabel, x + 2, y + 2);
-			ofSetColor(255, 255, 255, 220);
-			titleFont.drawString(clusterLabel, x, y);
-		} else {
-			float strWidth = clusterLabel.length() * 8.0f;
-			float x = (ofGetWidth() - strWidth) / 2.0f;
-			float y = ofGetHeight() - 40.0f;
-			ofSetColor(0, 0, 0, 150);
-			ofDrawBitmapString(clusterLabel, x + 2, y + 2);
-			ofSetColor(255, 255, 255, 220);
-			ofDrawBitmapString(clusterLabel, x, y);
 		}
 	}
 
@@ -1421,6 +1687,8 @@ void ofApp::drawVisuals() {
 		ly += lineH;
 		ofDrawBitmapString("  t       Toggle text labels", lx, ly);
 		ly += lineH;
+		ofDrawBitmapString("  a       Fade points and paths in/out", lx, ly);
+		ly += lineH;
 		ofDrawBitmapString("  d     Toggle debug info", lx, ly);
 		ly += lineH;
 		ofDrawBitmapString("  ,     Toggle settings panel", lx, ly);
@@ -1440,6 +1708,14 @@ void ofApp::drawVisuals() {
 		ofDrawBitmapString("  s     Save current Composition to JSON", lx, ly);
 		ly += lineH;
 		ofDrawBitmapString("  o     Load Points or Composition from JSON", lx, ly);
+		ly += lineH * 2;
+		ofDrawBitmapString("--- Annotations ---", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  Tab       Toggle annotation mode (draw callout labels)", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  Shift+Tab Toggle annotation visibility", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  0         Pull all annotation labels inside point bounds", lx, ly);
 		ly += lineH * 2;
 		ofDrawBitmapString("Press H to close", lx, ly);
 		ofDisableBlendMode();
@@ -1463,11 +1739,22 @@ void ofApp::drawProjector(ofEventArgs & args) {
 
 void ofApp::exit() {
 	gui.saveToFile("settings.xml");
+	annotationManager.saveToFile("annotations.json");
 }
 
 //--------------------------------------------------------------
 void ofApp::keyPressed(int key) {
 	inputManager.updateModifiers(key, true);
+
+	// Annotation system gets first crack — when typing, it consumes all keys
+	if (annotationManager.onKeyPressed(key, points)) return;
+
+	// Pull all labels inside point bounds
+	if (key == '0') {
+		annotationManager.clampAllLabelsToPointsBounds(points);
+		ofLogNotice("AnnotationManager") << "Pulled annotation labels inside point bounds.";
+		return;
+	}
 
 	// Delegate to InputManager for command mapping
 	AppCommand cmd = inputManager.getCommandForKey(key);
@@ -1576,6 +1863,10 @@ void ofApp::keyPressed(int key) {
 		showTitle = !showTitle;
 		break;
 
+	case CMD_TOGGLE_DATA_VISIBILITY:
+		targetDataVisualAlpha = (targetDataVisualAlpha > 0.5f) ? 0.0f : 1.0f;
+		break;
+
 	case CMD_TOGGLE_PINGPONG:
 		if (selectedPath) {
 			selectedPath->isPingPong = !selectedPath->isPingPong;
@@ -1624,16 +1915,19 @@ void ofApp::keyPressed(int key) {
 	case CMD_CLOUD_LOCAL:
 		currentCloudMode = PointCloudMode::LOCAL;
 		ofLogNotice("ofApp") << "Switched to LOCAL point cloud";
+		annotationManager.refreshAnchors(points);
 		break;
 
 	case CMD_CLOUD_MID:
 		currentCloudMode = PointCloudMode::MID;
 		ofLogNotice("ofApp") << "Switched to MID point cloud";
+		annotationManager.refreshAnchors(points);
 		break;
 
 	case CMD_CLOUD_GLOBAL:
 		currentCloudMode = PointCloudMode::GLOBAL;
 		ofLogNotice("ofApp") << "Switched to GLOBAL point cloud";
+		annotationManager.refreshAnchors(points);
 		break;
 
 	case CMD_CYCLE_THIRD_DIM:
@@ -1706,6 +2000,7 @@ void ofApp::keyPressed(int key) {
 			selectedPointIdx = -1;
 			neighbourSeqPlaying = false;
 			neighbourQueue.clear();
+			neighbourQueueDistances.clear();
 			neighbourLastPlayedIdx = -1;
 			neighbourLastPlayedMs = 0;
 		}
@@ -1728,9 +2023,11 @@ void ofApp::keyPressed(int key) {
 			}
 			std::sort(distIdx.begin(), distIdx.end());
 			neighbourQueue.clear();
+			neighbourQueueDistances.clear();
 			for (auto & di : distIdx) {
 				if (di.second >= 0 && di.second < (int)points.size()) {
 					neighbourQueue.push_back(di.second);
+					neighbourQueueDistances.push_back(di.first);
 				}
 			}
 			neighbourSeqIdx = 0;
@@ -1745,12 +2042,30 @@ void ofApp::keyPressed(int key) {
 			// No previous binding for u/U — do nothing
 		} else if (selectedPointIdx >= 0 && selectedPointIdx < (int)points.size()) {
 			const DataPoint & sel = points[selectedPointIdx];
-			float vol = paths.empty() ? 0.5f : paths[0]->volume;
+			float baseVol = paths.empty() ? 0.5f : paths[0]->volume;
 			string mode = paths.empty() ? "once" : paths[0]->getMode();
 			int numN = (int)std::min(sel.true_neighbors.size(), sel.true_distances.size());
+
+			float minD = std::numeric_limits<float>::max();
+			float maxD = std::numeric_limits<float>::lowest();
 			for (int ni = 0; ni < numN; ++ni) {
 				int idx = sel.true_neighbors[ni];
 				if (idx >= 0 && idx < (int)points.size()) {
+					float d = sel.true_distances[ni];
+					minD = std::min(minD, d);
+					maxD = std::max(maxD, d);
+				}
+			}
+			float range = std::max(maxD - minD, 1e-6f);
+
+			for (int ni = 0; ni < numN; ++ni) {
+				int idx = sel.true_neighbors[ni];
+				if (idx >= 0 && idx < (int)points.size()) {
+					float d = sel.true_distances[ni];
+					float nearWeight = 1.0f - ((d - minD) / range); // near=1, far=0
+					nearWeight = std::clamp(nearWeight, 0.0f, 1.0f);
+					float volScale = ofLerp(0.2f, 1.0f, nearWeight);
+					float vol = baseVol * volScale;
 					oscManager.sendSample(mediaRoot + points[idx].filename, "path-0", vol, mode);
 				}
 			}
@@ -1893,17 +2208,23 @@ void ofApp::keyPressed(int key) {
 				if (p.y < minY) minY = p.y;
 				if (p.y > maxY) maxY = p.y;
 			}
+
+			// Include annotation anchors and label boxes only when annotations
+			// are visible. Hidden annotations should not affect zoom-to-extents.
+			if (annotationManager.isVisible()) {
+				annotationManager.expandWorldBounds(minX, minY, maxX, maxY);
+			}
+
 			float dataWidth = (maxX - minX) * 1.2f;
 			float dataHeight = (maxY - minY) * 1.2f;
 			if (dataWidth <= 0) dataWidth = 1000;
 			if (dataHeight <= 0) dataHeight = 1000;
-			zoom = std::min(ofGetWidth() / dataWidth, ofGetHeight() / dataHeight);
+			float newZoom = std::min(ofGetWidth() / dataWidth, ofGetHeight() / dataHeight);
 			float centerX = (minX + maxX) / 2.0f;
 			float centerY = (minY + maxY) / 2.0f;
-			pan.set(-centerX * zoom, -centerY * zoom);
+			setViewTarget(newZoom, ofVec2f(-centerX * newZoom, -centerY * newZoom), true);
 		} else {
-			zoom = 1.0f;
-			pan.set(0, 0);
+			setViewTarget(1.0f, ofVec2f(0, 0), true);
 		}
 		break;
 
@@ -2021,6 +2342,18 @@ void ofApp::keyReleased(int key) {
 
 //--------------------------------------------------------------
 void ofApp::mousePressed(int x, int y, int button) {
+	// Forward to annotation system first
+	if (annotationManager.onMousePressed(glm::vec2(x, y), button)) return;
+
+	// While adjusting radius/speed via drag, consume press and block mode actions.
+	if (bHoldingR || bHoldingV) {
+		lastMouse.set(x, y);
+		isDragging = false;
+		isDraggingPath = false;
+		isMarqueeZooming = false;
+		return;
+	}
+
 	ofVec2f worldPos = screenToWorld(x, y);
 
 	if (currentMode == DRAW_FREEHAND) {
@@ -2121,50 +2454,65 @@ void ofApp::mousePressed(int x, int y, int button) {
 
 //--------------------------------------------------------------
 void ofApp::mouseDragged(int x, int y, int button) {
-	if (selectedPath) {
-		if (bHoldingR) {
-			float deltaY = lastMouse.y - y;
-			// Scale sensitivity based on current zoom so it feels consistent
-			selectedPath->radius += deltaY * (2.0f / zoom);
-
-			// Bound radius
-			if (selectedPath->radius < 0.001f) selectedPath->radius = 0.001f;
-
-			// Max radius of screen height (adjusted for scale)
-			float maxRadius = ofGetHeight() / zoom;
-			if (selectedPath->radius > maxRadius) selectedPath->radius = maxRadius;
-
-			oscManager.sendUIPathUpdate(selectedPath->id, selectedPath->isActive,
-				selectedPath->radius, selectedPath->direction, selectedPath->sampleNum,
-				selectedPath->volume, selectedPath->falloff, selectedPath->speed, selectedPath->mode);
-
-			lastMouse.set(x, y);
-			return; // handled
-		}
+	// Forward to annotation system
+	if (annotationManager.onMouseDragged(glm::vec2(x, y),
+	    glm::vec2(x - lastMouse.x, y - lastMouse.y))) {
+		lastMouse.set(x, y);
+		return;
 	}
-	// bHoldingV can apply to selectedPath or default path-0
-	if (bHoldingV) {
-		if (selectedPath) {
-			float deltaY = lastMouse.y - y;
-			selectedPath->speed += deltaY * 0.01f;
-			if (selectedPath->speed < 0.0f) selectedPath->speed = 0.0f;
 
-			oscManager.sendUIPathUpdate(selectedPath->id, selectedPath->isActive,
-				selectedPath->radius, selectedPath->direction, selectedPath->sampleNum,
-				selectedPath->volume, selectedPath->falloff, selectedPath->speed, selectedPath->mode);
-		} else if (!paths.empty()) {
-			auto targetPath = paths[0];
-			float deltaY = lastMouse.y - y;
-			targetPath->volume += deltaY * 0.01f;
-			if (targetPath->volume < 0.0f) targetPath->volume = 0.0f;
-			if (targetPath->volume > 5.0f) targetPath->volume = 5.0f; // Limit max volume to avoid blowout
+	if (bHoldingR || bHoldingV) {
+		auto targetPath = selectedPath ? selectedPath : (!paths.empty() ? paths[0] : nullptr);
+
+		// Compute point-cloud extents diagonal in world units.
+		float diag = 0.0f;
+		if (!points.empty()) {
+			float minX = std::numeric_limits<float>::max();
+			float maxX = std::numeric_limits<float>::lowest();
+			float minY = std::numeric_limits<float>::max();
+			float maxY = std::numeric_limits<float>::lowest();
+			for (const auto & p : points) {
+				minX = std::min(minX, p.x);
+				maxX = std::max(maxX, p.x);
+				minY = std::min(minY, p.y);
+				maxY = std::max(maxY, p.y);
+			}
+			diag = ofVec2f(maxX - minX, maxY - minY).length();
+		}
+		if (diag <= 0.0f) {
+			lastMouse.set(x, y);
+			return;
+		}
+
+		// Bottom of screen is minimum, top is maximum.
+		float t = std::clamp(1.0f - ((float)y / std::max(1.0f, (float)ofGetHeight())), 0.0f, 1.0f);
+
+		if (targetPath) {
+			if (bHoldingR) {
+				// Radius uses log interpolation for better control at small values.
+				// Max diameter is extents diagonal, so max radius is half of that.
+				float minRadius = std::max(diag * 0.001f, 0.001f);
+				float maxRadius = std::max(minRadius, diag * 0.5f);
+				float ratio = maxRadius / minRadius;
+				targetPath->radius = minRadius * std::pow(ratio, t);
+			}
+
+			if (bHoldingV) {
+				// Max speed is extents diagonal / 4 (world units per frame).
+				// Use log interpolation so lower-speed region has finer practical control.
+				float minSpeed = std::max(diag * 0.00005f, 0.0001f);
+				float maxSpeed = std::max(minSpeed, diag * 0.25f);
+				float ratio = maxSpeed / minSpeed;
+				targetPath->speed = minSpeed * std::pow(ratio, t);
+			}
 
 			oscManager.sendUIPathUpdate(targetPath->id, targetPath->isActive,
 				targetPath->radius, targetPath->direction, targetPath->sampleNum,
 				targetPath->volume, targetPath->falloff, targetPath->speed, targetPath->mode);
 		}
+
 		lastMouse.set(x, y);
-		return; // handled
+		return; // consume drag so it cannot pan/wander/browse-drag
 	}
 
 	// Allow gesture recording even in BROWSE mode (before the early return)
@@ -2239,6 +2587,9 @@ void ofApp::mouseDragged(int x, int y, int button) {
 
 //--------------------------------------------------------------
 void ofApp::mouseReleased(int x, int y, int button) {
+	// Forward to annotation system
+	if (annotationManager.onMouseReleased(glm::vec2(x, y))) return;
+
 	// Stop path dragging
 	isDraggingPath = false;
 
@@ -2303,8 +2654,7 @@ void ofApp::mouseReleased(int x, int y, int button) {
 			// 0 = (targetWorld * newZoom) + newPan
 			// newPan = -(targetWorld * newZoom)
 
-			pan = -(targetWorld * newZoom);
-			zoom = newZoom;
+			setViewTarget(newZoom, -(targetWorld * newZoom), true);
 		}
 		isMarqueeZooming = false;
 	}
@@ -2371,6 +2721,21 @@ ofVec2f ofApp::screenToWorld(float x, float y) {
 
 	ofVec2f center(ofGetWidth() / 2, ofGetHeight() / 2);
 	return (ofVec2f(x, y) - pan - center) / zoom;
+}
+
+void ofApp::setViewTarget(float newZoom, const ofVec2f & newPan, bool animate) {
+	newZoom = std::max(newZoom, 0.0001f);
+	if (animate) {
+		targetZoom = newZoom;
+		targetPan = newPan;
+		isViewAnimating = true;
+	} else {
+		zoom = newZoom;
+		pan = newPan;
+		targetZoom = newZoom;
+		targetPan = newPan;
+		isViewAnimating = false;
+	}
 }
 
 //--------------------------------------------------------------
@@ -2516,7 +2881,7 @@ bool ofApp::loadPoints(string jsonPath) {
 
 			float zoomX = screenW / dataWidth;
 			float zoomY = screenH / dataHeight;
-			zoom = std::min(zoomX, zoomY);
+			float newZoom = std::min(zoomX, zoomY);
 
 			// Center
 			float centerX = (minX + maxX) / 2.0f;
@@ -2536,9 +2901,10 @@ bool ofApp::loadPoints(string jsonPath) {
 			// 0 = (centerWorld * zoom) + pan
 			// pan = -(centerWorld * zoom)
 
-			pan.set(-centerX * zoom, -centerY * zoom);
+			ofVec2f newPan(-centerX * newZoom, -centerY * newZoom);
+			setViewTarget(newZoom, newPan, true);
 
-			ofLogNotice("ofApp::loadPoints") << "Auto-framed. Zoom: " << zoom << " Pan: " << pan;
+			ofLogNotice("ofApp::loadPoints") << "Auto-framed. Target zoom: " << newZoom << " Target pan: " << newPan;
 		}
 
 		// Rebuild grid
@@ -2552,6 +2918,21 @@ bool ofApp::loadPoints(string jsonPath) {
 		}
 		std::sort(sortedClusterIds.begin(), sortedClusterIds.end());
 		activeClusterId = -999; // Reset filter on new load
+
+		// Restore saved annotations now that points exist to anchor them to.
+		// This also clears any previously loaded annotations when a new file is opened.
+		annotationManager.loadFromFile("annotations.json", points);
+
+		// Register cluster annotations for any labelled clusters
+		for (const auto & kv : clusters) {
+			if (!kv.second.label.empty()) {
+				annotationManager.addClusterAnnotation(kv.second.id, kv.second.label, points);
+			}
+		}
+
+		// Final safety pass: ensure every loaded/generated annotation label is
+		// fully inside the current point bounds.
+		annotationManager.clampAllLabelsToPointsBounds(points);
 
 		return true;
 	} else {
@@ -2599,11 +2980,41 @@ void ofApp::triggerVideo(const DataPoint & p) {
 				// Swap: old front keeps running as back — no reload, no flash
 				std::swap(videoFront, videoBack);
 				videoFront->load(videoPath);
-				videoFront->setLoopState(OF_LOOP_NORMAL); // always loop so clip never stops
+				videoFront->setLoopState(OF_LOOP_NORMAL);
 				videoFront->play();
 				videoFront->setVolume(0);
 				videoAlpha = 0.0f;
 				videoAlphaTarget = 255.0f;
+			} else if (videoDisplayMode.get() == 2) {
+				// GHOST MODE: evict the oldest layer, push a new clip in at front.
+				auto evicted = ghostPlayers.back();
+				evicted->stop();
+				evicted->close();
+				ghostPlayers.pop_back();
+				evicted->load(videoPath);
+				evicted->setLoopState(OF_LOOP_NORMAL);
+				evicted->play();
+				evicted->setVolume(0);
+				ghostPlayers.push_front(evicted);
+			} else if (videoDisplayMode.get() == 3) {
+				// MAPPED MODE: recycle oldest player instead of creating new ones.
+				if (mappedPlayers.empty()) {
+					MappedClip mc;
+					mc.player = std::make_shared<ofVideoPlayer>();
+					mappedPlayers.push_back(mc);
+				}
+
+				auto evicted = mappedPlayers.back();
+				evicted.player->stop();
+				evicted.player->close();
+				mappedPlayers.pop_back();
+
+				evicted.point = p;
+				evicted.player->load(videoPath);
+				evicted.player->setLoopState(OF_LOOP_NORMAL);
+				evicted.player->play();
+				evicted.player->setVolume(0);
+				mappedPlayers.push_front(evicted);
 			} else {
 				videoQueue.push_back(videoPath);
 			}
@@ -2853,8 +3264,9 @@ void ofApp::loadCompositionOrPoints(string filepath) {
 
 		// 3. Restore settings
 		if (root.isMember("settings")) {
-			zoom = root["settings"]["zoom"].asFloat();
-			pan.set(root["settings"]["pan_x"].asFloat(), root["settings"]["pan_y"].asFloat());
+			float restoredZoom = root["settings"]["zoom"].asFloat();
+			ofVec2f restoredPan(root["settings"]["pan_x"].asFloat(), root["settings"]["pan_y"].asFloat());
+			setViewTarget(restoredZoom, restoredPan, true);
 		}
 
 		// 4. Restore paths

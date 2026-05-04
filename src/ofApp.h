@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Annotation.h"
 #include "DataPoint.h"
 #include "InputManager.h"
 #include "OscManager.h"
@@ -87,6 +88,7 @@ public:
 	float neighbourSeqGapMs = 300.0f; // configurable gap between triggers
 	// Sorted neighbour indices (by distance, nearest first) for the active point
 	std::vector<int> neighbourQueue; // point indices in play order
+	std::vector<float> neighbourQueueDistances; // distance values aligned with neighbourQueue
 	// Flash illumination: which neighbour point index was last triggered and when
 	int neighbourLastPlayedIdx = -1;     // index into points[]
 	uint64_t neighbourLastPlayedMs = 0;  // timestamp of last trigger (ms)
@@ -95,9 +97,14 @@ public:
 	// View
 	float zoom;
 	ofVec2f pan;
+	float targetZoom;
+	ofVec2f targetPan;
+	bool isViewAnimating = false;
 	bool isDragging;
 	ofVec2f lastMouse;
 	std::unordered_set<DataPoint> mouseActivePoints;
+	float dataVisualAlpha = 1.0f;
+	float targetDataVisualAlpha = 1.0f;
 
 	// Browse Mode
 	DataPoint hoveredPoint;
@@ -123,6 +130,9 @@ public:
 
 	// Input
 	InputManager inputManager;
+
+	// Annotations
+	AnnotationManager annotationManager;
 
 	// Video — double-buffered; swap pointers on transition (no reload of back)
 	ofVideoPlayer _vp1, _vp2;
@@ -155,6 +165,26 @@ public:
 	std::vector<std::shared_ptr<ofVideoPlayer>> gridPlayers;
 	std::deque<string> videoQueue;
 
+	// Ghost/Accumulation Mode State (mode 2)
+	static constexpr int kGhostLayers = 6;
+	std::deque<std::shared_ptr<ofVideoPlayer>> ghostPlayers; // oldest at back, newest at front
+
+	// Data-Mapped Mode State (mode 3)
+	static constexpr int kMappedMax = 8;
+	struct MappedClip {
+		DataPoint point;
+		std::shared_ptr<ofVideoPlayer> player;
+	};
+	std::deque<MappedClip> mappedPlayers; // oldest at back, newest at front
+
+	// Tile Collage Mode State (mode 4)
+	static constexpr int kCollageCols = 5;
+	static constexpr int kCollageRows = 4;
+	std::vector<std::shared_ptr<ofVideoPlayer>> collagePlayers;
+	std::vector<float> collageAnglesDeg;
+	std::vector<ofVec2f> collageOffsetsPx;
+	int collageWriteCounter = 0;
+
 	// Datamosh Mode State
 	struct MotionVector {
 		int dx, dy;
@@ -183,8 +213,12 @@ public:
 	ofParameter<float> selectedPointSize;
 	ofParameter<float> hoveredPointSize;
 	ofParameter<float> fontSize;
+	ofParameter<float> annotationFontSize;
 	ofParameter<float> activeFontSize;
 	ofParameter<float> titleFontSize;
+	ofParameter<ofColor> gridColor;
+	ofParameter<float> gridSpacing;
+	ofParameter<float> zoomAnimationSpeed;
 	ofParameter<float> playheadSize;
 	ofParameter<float> pathThickness;
 	ofParameter<float> selectedPathThickness;
@@ -193,7 +227,7 @@ public:
 	ofParameter<float> videoFadeSpeed_param; // crossfade speed (alpha/frame)
 	ofParameter<float> cloudTransitionSpeed; // transition speed between clouds
 
-	ofParameter<int> videoDisplayMode; // 0=default, 1=grid, 2=datamosh
+	ofParameter<int> videoDisplayMode; // 0=single, 1=grid, 2=ghost, 3=mapped, 4=collage
 	ofParameter<int> macroblockSize;
 	ofParameter<float> macroblockThreshold;
 	ofParameter<float> datamoshDecay;
@@ -202,11 +236,13 @@ public:
 
 	// Fonts
 	ofTrueTypeFont font;
+	ofTrueTypeFont annotationFont;
 	ofTrueTypeFont activeFont;
 	ofTrueTypeFont titleFont;
 
 	// Helpers
 	ofVec2f screenToWorld(float x, float y);
+	void setViewTarget(float newZoom, const ofVec2f & newPan, bool animate = true);
 	bool loadPoints(string jsonPath);
 	void sendOscMessage(string num, float val);
 	void triggerVideo(const DataPoint & p);

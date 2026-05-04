@@ -1,5 +1,5 @@
-obj/osx/Release/src/main.o: src/main.cpp src/ofApp.h src/DataPoint.h \
-  ../../../libs/openFrameworks/ofMain.h \
+obj/osx/Release/src/main.o: src/main.cpp src/ofApp.h src/Annotation.h \
+  src/DataPoint.h ../../../libs/openFrameworks/ofMain.h \
   ../../../libs/openFrameworks/utils/ofConstants.h \
   ../../../libs/glew/include/GL/glew.h \
   ../../../libs/tess2/include/tesselator.h \
@@ -454,7 +454,10 @@ obj/osx/Release/src/main.o: src/main.cpp src/ofApp.h src/DataPoint.h \
   ../../../libs/openFrameworks/video/ofVideoPlayer.h \
   ../../../libs/openFrameworks/3d/of3dUtils.h \
   ../../../libs/openFrameworks/3d/ofCamera.h \
-  ../../../libs/openFrameworks/3d/ofEasyCam.h src/InputManager.h \
+  ../../../libs/openFrameworks/3d/ofEasyCam.h \
+  ../../../addons/ofxJSON/src/ofxJSON.h \
+  ../../../addons/ofxJSON/libs/jsoncpp/include/json/json.h \
+  ../../../addons/ofxJSON/src/ofxJSONElement.h src/InputManager.h \
   src/OscManager.h src/PathObject.h src/SpatialGrid.h \
   ../../../addons/ofxOsc/src/ofxOsc.h \
   ../../../addons/ofxOsc/src/ofxOscArg.h \
@@ -484,6 +487,7 @@ obj/osx/Release/src/main.o: src/main.cpp src/ofApp.h src/DataPoint.h \
   ../../../addons/ofxGui/src/ofxColorPicker.h \
   ../../../addons/ofxGui/src/ofxPanel.h
 src/ofApp.h:
+src/Annotation.h:
 src/DataPoint.h:
 ../../../libs/openFrameworks/ofMain.h:
 ../../../libs/openFrameworks/utils/ofConstants.h:
@@ -941,6 +945,9 @@ src/DataPoint.h:
 ../../../libs/openFrameworks/3d/of3dUtils.h:
 ../../../libs/openFrameworks/3d/ofCamera.h:
 ../../../libs/openFrameworks/3d/ofEasyCam.h:
+../../../addons/ofxJSON/src/ofxJSON.h:
+../../../addons/ofxJSON/libs/jsoncpp/include/json/json.h:
+../../../addons/ofxJSON/src/ofxJSONElement.h:
 src/InputManager.h:
 src/OscManager.h:
 src/PathObject.h:

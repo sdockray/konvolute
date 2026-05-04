@@ -111,6 +111,9 @@ AppCommand InputManager::getCommandForKey(int key) {
 		return CMD_CLUSTER_NEXT;
 	case '\\':
 		return CMD_CLUSTER_CLEAR;
+	case 'a':
+	case 'A':
+		return CMD_TOGGLE_DATA_VISIBILITY;
 	default:
 		return CMD_NONE;
 	}

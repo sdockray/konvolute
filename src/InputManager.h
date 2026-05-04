@@ -44,6 +44,7 @@ enum AppCommand {
 	CMD_CLUSTER_PREV, // '['
 	CMD_CLUSTER_NEXT, // ']'
 	CMD_CLUSTER_CLEAR, // '\'
+	CMD_TOGGLE_DATA_VISIBILITY, // 'a'
 	CMD_TOGGLE_NEIGHBOUR, // 'N' (Shift+n)
 	CMD_NEIGHBOUR_PLAY_SEQ, // 'I' when neighbour mode active
 	CMD_NEIGHBOUR_PLAY_ALL // 'U' when neighbour mode active

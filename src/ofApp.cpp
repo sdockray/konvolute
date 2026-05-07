@@ -111,7 +111,7 @@ void ofApp::setup() {
 	params.add(gridColor.set("Grid Color", ofColor(120, 140, 170, 70), ofColor(0, 0, 0, 0), ofColor(255, 255, 255, 255)));
 	params.add(gridSpacing.set("Grid Spacing", 2.0f, 0.2f, 20.0f));
 	params.add(zoomAnimationSpeed.set("Zoom Animation Speed", 0.2f, 0.02f, 1.0f));
-	params.add(playheadSize.set("Playhead Size", 5.0f, 1.0f, 200.0f));
+	params.add(playheadSize.set("Playhead Size", 1.0f, 0.1f, 200.0f));
 	params.add(pathThickness.set("Path Thickness", 1.0f, 0.1f, 20.0f));
 	params.add(selectedPathThickness.set("Selected Path Thickness", 2.0f, 0.1f, 20.0f));
 	params.add(playheadColor.set("Playhead Color", ofColor(255), ofColor(0, 0), ofColor(255, 255)));
@@ -150,16 +150,17 @@ void ofApp::setup() {
 	gui.setup(params);
 	gui.loadFromFile("settings.xml");
 
-	// Load Font - try to load a system font or default
-	bool fontLoaded = font.load("verdana.ttf", fontSize);
+	// Load Font - Latin Modern Roman (LaTeX-style serif)
+	bool fontLoaded = font.load("lmroman10-regular.otf", fontSize);
 	if (!fontLoaded) fontLoaded = font.load(OF_TTF_SANS, fontSize);
-	bool annotationFontLoaded = annotationFont.load("verdana.ttf", annotationFontSize);
+	//bool annotationFontLoaded = annotationFont.load("lmroman10-italic.otf", annotationFontSize);
+	bool annotationFontLoaded = annotationFont.load("lmroman10-regular.otf", annotationFontSize);
 	if (!annotationFontLoaded) annotationFontLoaded = annotationFont.load(OF_TTF_SANS, annotationFontSize);
 
-	bool activeFontLoaded = activeFont.load("verdana.ttf", activeFontSize);
+	bool activeFontLoaded = activeFont.load("lmroman10-regular.otf", activeFontSize);
 	if (!activeFontLoaded) activeFontLoaded = activeFont.load(OF_TTF_SANS, activeFontSize);
 
-	bool titleFontLoaded = titleFont.load("verdana.ttf", titleFontSize);
+	bool titleFontLoaded = titleFont.load("lmroman10-bold.otf", titleFontSize);
 	if (!titleFontLoaded) titleFontLoaded = titleFont.load(OF_TTF_SANS, titleFontSize);
 
 	// Load default data
@@ -907,8 +908,27 @@ void ofApp::update() {
 			}
 		} else if (videoDisplayMode.get() == 3) {
 			// MAPPED MODE — update all active mapped clips
-			for (auto & mc : mappedPlayers) {
-				if (mc.player->isLoaded() && mc.player->isPlaying()) mc.player->update();
+			uint64_t nowMs = ofGetElapsedTimeMillis();
+			bool allowLowFpsUpdate = (nowMs - mappedLowFpsLastUpdateMs) >= 66; // ~15 FPS
+			if (allowLowFpsUpdate) mappedLowFpsLastUpdateMs = nowMs;
+
+			float centerX = ofGetWidth() * 0.5f;
+			float centerY = ofGetHeight() * 0.5f;
+			float margin = 220.0f;
+			for (size_t i = 0; i < mappedPlayers.size(); ++i) {
+				auto & mc = mappedPlayers[i];
+				if (!mc.player->isLoaded() || !mc.player->isPlaying()) continue;
+
+				// Newest clip always updates (highest frame rate).
+				bool isTopMost = (i + 1 == mappedPlayers.size());
+				if (!isTopMost && !allowLowFpsUpdate) continue;
+
+				float sx = mc.point.x * zoom + pan.x + centerX;
+				float sy = mc.point.y * zoom + pan.y + centerY;
+				bool onScreen = (sx > -margin && sx < ofGetWidth() + margin && sy > -margin && sy < ofGetHeight() + margin);
+				if (isTopMost || onScreen) {
+					mc.player->update();
+				}
 			}
 		} else if (videoDisplayMode.get() == 4) {
 			// COLLAGE MODE
@@ -1125,23 +1145,8 @@ void ofApp::drawVisuals() {
 			ofSetColor(255);
 		} else if (videoDisplayMode.get() == 3) {
 			// DATA-MAPPED MODE
-			// Each clip plays centred on the screen position of the data point that triggered it.
+			// Draw background only here; mapped clips are rendered later above point cloud.
 			ofBackground(backgroundColor);
-			ofSetColor(255);
-			// Thumbnail height in world units — 15% of visible screen height.
-			float worldThumbH = (ofGetHeight() * 0.15f) / std::max(zoom, 0.001f);
-			float centerX = ofGetWidth()  * 0.5f;
-			float centerY = ofGetHeight() * 0.5f;
-			for (auto & mc : mappedPlayers) {
-				if (!mc.player->isLoaded() || mc.player->getWidth() <= 0) continue;
-				float sx = mc.point.x * zoom + pan.x + centerX;
-				float sy = mc.point.y * zoom + pan.y + centerY;
-				float vw = mc.player->getWidth(), vh = mc.player->getHeight();
-				float aspect = (vh > 0) ? vw / vh : 1.0f;
-				float screenH = worldThumbH * zoom;
-				float screenW = screenH * aspect;
-				mc.player->draw(sx - screenW * 0.5f, sy - screenH * 0.5f, screenW, screenH);
-			}
 			ofSetColor(255);
 		} else if (videoDisplayMode.get() == 4) {
 			// TILE COLLAGE MODE
@@ -1243,6 +1248,35 @@ void ofApp::drawVisuals() {
 	ofScale(zoom, zoom);
 	float dataAlphaScale = std::clamp(dataVisualAlpha, 0.0f, 1.0f);
 
+	// Build active point lookup from currently playing path points.
+	std::unordered_set<std::string> activePointFiles;
+	for (const auto & path : paths) {
+		for (const auto & p : path->playingPoints) {
+			activePointFiles.insert(p.filename);
+		}
+	}
+	for (const auto & p : mouseActivePoints) {
+		activePointFiles.insert(p.filename);
+	}
+
+	// Point size mapping in world units based on current point-cloud extents.
+	// Required mapping: slider 1 => diag/5000, slider 100 => diag.
+	float extMinX = std::numeric_limits<float>::max();
+	float extMaxX = std::numeric_limits<float>::lowest();
+	float extMinY = std::numeric_limits<float>::max();
+	float extMaxY = std::numeric_limits<float>::lowest();
+	for (const auto & p : points) {
+		extMinX = std::min(extMinX, p.x);
+		extMaxX = std::max(extMaxX, p.x);
+		extMinY = std::min(extMinY, p.y);
+		extMaxY = std::max(extMaxY, p.y);
+	}
+	float pointsDiag = points.empty() ? 1.0f : ofVec2f(extMaxX - extMinX, extMaxY - extMinY).length();
+	pointsDiag = std::max(pointsDiag, 1e-6f);
+	float sizeT = std::clamp((pointSize.get() - 1.0f) / 99.0f, 0.0f, 1.0f);
+	float diagFactor = (1.0f / 1000.0f) * std::pow(1000.0f, sizeT); // log interpolation
+	float basePointRadiusWorld = pointsDiag * diagFactor;
+
 	// Draw Points
 	ofFill(); // Ensure fill is enabled
 	ofColor c = pointColor.get();
@@ -1253,13 +1287,34 @@ void ofApp::drawVisuals() {
 		baseAlpha = (float)c.a;
 	}
 
-	for (const auto & p : points) {
+	for (int i = 0; i < (int)points.size(); ++i) {
+		const auto & p = points[i];
 		// Cluster foregrounding: dim non-active cluster points
 		float alpha = baseAlpha;
 		if (activeClusterId != -999 && p.cluster_id != activeClusterId) {
 			alpha = baseAlpha * 0.15f; // 15% of normal
 		}
-		ofSetColor(c.r, c.g, c.b, (int)(alpha * dataAlphaScale));
+
+		bool isHovered = hasHoveredPoint && (p.filename == hoveredPoint.filename);
+		bool isSelectedPoint = (selectedPointIdx == i) || (hasLastHoveredPoint && (p.filename == lastHoveredPoint.filename));
+		bool isAutoActive = (activePointFiles.find(p.filename) != activePointFiles.end());
+
+		ofColor drawColor = c;
+		float sizeMultiplier = 1.0f;
+		if (isAutoActive) {
+			drawColor = activePointColor.get();
+			sizeMultiplier = std::max(1.0f, selectedPointSize.get() / std::max(1.0f, pointSize.get()));
+		}
+		if (isSelectedPoint) {
+			drawColor = selectedColor.get();
+			sizeMultiplier = std::max(1.0f, selectedPointSize.get() / std::max(1.0f, pointSize.get()));
+		}
+		if (isHovered) {
+			drawColor = hoveredColor.get();
+			sizeMultiplier = std::max(1.0f, hoveredPointSize.get() / std::max(1.0f, pointSize.get()));
+		}
+
+		ofSetColor(drawColor.r, drawColor.g, drawColor.b, (int)(alpha * dataAlphaScale));
 
 		float scale = 1.0f;
 		if (currentThirdDimMode != ThirdDimMode::NONE) {
@@ -1279,7 +1334,7 @@ void ofApp::drawVisuals() {
 			}
 			scale = ofLerp(0.2f, 2.0f, val);
 		}
-		ofDrawCircle(p.x, p.y, (pointSize / zoom) * scale);
+		ofDrawCircle(p.x, p.y, basePointRadiusWorld * scale * sizeMultiplier);
 	}
 
 	// --- Neighbour Mode Highlighting ---
@@ -1337,7 +1392,7 @@ void ofApp::drawVisuals() {
 		ofSetColor(255, 255, 100, (int)(230 * dataAlphaScale)); // bright yellow
 		ofNoFill();
 		ofSetLineWidth(2.0f);
-		ofDrawCircle(sel.x, sel.y, (pointSize / zoom) * 2.5f);
+		ofDrawCircle(sel.x, sel.y, basePointRadiusWorld * 2.5f);
 		ofFill();
 		ofSetLineWidth(1.0f);
 	}
@@ -1366,11 +1421,28 @@ void ofApp::drawVisuals() {
 
 	ofPopMatrix();
 
+	// In mapped mode, draw videos above the point cloud.
+	if (showVideo && videoDisplayMode.get() == 3) {
+		ofSetColor(255);
+		float worldThumbH = (ofGetHeight() * 0.15f) / std::max(zoom, 0.001f);
+		float centerX = ofGetWidth() * 0.5f;
+		float centerY = ofGetHeight() * 0.5f;
+		for (auto & mc : mappedPlayers) {
+			if (!mc.player->isLoaded() || mc.player->getWidth() <= 0) continue;
+			float sx = mc.point.x * zoom + pan.x + centerX;
+			float sy = mc.point.y * zoom + pan.y + centerY;
+			float vw = mc.player->getWidth(), vh = mc.player->getHeight();
+			float aspect = (vh > 0) ? vw / vh : 1.0f;
+			float screenH = worldThumbH * zoom;
+			float screenW = screenH * aspect;
+			mc.player->draw(sx - screenW * 0.5f, sy - screenH * 0.5f, screenW, screenH);
+		}
+	}
+
 	// Update annotation font size if changed.
 	static float lastAnnotationFontSize = annotationFontSize;
 	if (std::abs(lastAnnotationFontSize - annotationFontSize.get()) > 0.5f) {
-		bool result = annotationFont.load("Futura.ttc", annotationFontSize);
-		if (!result) result = annotationFont.load("verdana.ttf", annotationFontSize);
+		bool result = annotationFont.load("lmroman10-italic.otf", annotationFontSize);
 		if (!result) annotationFont.load(OF_TTF_SANS, annotationFontSize);
 		lastAnnotationFontSize = annotationFontSize;
 	}
@@ -1432,7 +1504,7 @@ void ofApp::drawVisuals() {
 			// Update font size if changed
 			static float lastFontSize = fontSize;
 			if (abs(lastFontSize - fontSize) > 0.5f) {
-				bool result = font.load("Futura.ttc", fontSize);
+				bool result = font.load("lmroman10-regular.otf", fontSize);
 				if (!result) font.load(OF_TTF_SANS, fontSize);
 				lastFontSize = fontSize;
 			}
@@ -1474,8 +1546,7 @@ void ofApp::drawVisuals() {
 			// Update font size if changed
 			static float lastTitleFontSize = titleFontSize;
 			if (abs(lastTitleFontSize - titleFontSize) > 0.5f) {
-				bool result = titleFont.load("Futura.ttc", titleFontSize);
-				if (!result) result = titleFont.load("verdana.ttf", titleFontSize);
+				bool result = titleFont.load("lmroman10-bold.otf", titleFontSize);
 				if (!result) titleFont.load(OF_TTF_SANS, titleFontSize);
 				lastTitleFontSize = titleFontSize;
 			}
@@ -1644,6 +1715,8 @@ void ofApp::drawVisuals() {
 		ofDrawBitmapString("  e     Toggle step mode (timer-driven steps)", lx, ly);
 		ly += lineH;
 		ofDrawBitmapString("  Up/Dn Adjust speed", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  L/R   Adjust radius (same scale as r+drag)", lx, ly);
 		ly += lineH;
 		ofDrawBitmapString("  + / - Increase / decrease sample layer count", lx, ly);
 		ly += lineH;
@@ -2073,13 +2146,6 @@ void ofApp::keyPressed(int key) {
 		}
 		break;
 
-	case CMD_DECREASE_RADIUS: // 'R'
-		if (selectedPath) {
-			selectedPath->radius -= 10.0f;
-			if (selectedPath->radius < 0) selectedPath->radius = 0;
-		}
-		break;
-
 	case CMD_INCREASE_VOLUME: // 'v'
 		bHoldingV = true;
 		break;
@@ -2197,35 +2263,7 @@ void ofApp::keyPressed(int key) {
 		break;
 
 	case CMD_RESET_ZOOM: // 'z' — zoom to extents of loaded points
-		if (!points.empty()) {
-			float minX = std::numeric_limits<float>::max();
-			float maxX = std::numeric_limits<float>::lowest();
-			float minY = std::numeric_limits<float>::max();
-			float maxY = std::numeric_limits<float>::lowest();
-			for (const auto & p : points) {
-				if (p.x < minX) minX = p.x;
-				if (p.x > maxX) maxX = p.x;
-				if (p.y < minY) minY = p.y;
-				if (p.y > maxY) maxY = p.y;
-			}
-
-			// Include annotation anchors and label boxes only when annotations
-			// are visible. Hidden annotations should not affect zoom-to-extents.
-			if (annotationManager.isVisible()) {
-				annotationManager.expandWorldBounds(minX, minY, maxX, maxY);
-			}
-
-			float dataWidth = (maxX - minX) * 1.2f;
-			float dataHeight = (maxY - minY) * 1.2f;
-			if (dataWidth <= 0) dataWidth = 1000;
-			if (dataHeight <= 0) dataHeight = 1000;
-			float newZoom = std::min(ofGetWidth() / dataWidth, ofGetHeight() / dataHeight);
-			float centerX = (minX + maxX) / 2.0f;
-			float centerY = (minY + maxY) / 2.0f;
-			setViewTarget(newZoom, ofVec2f(-centerX * newZoom, -centerY * newZoom), true);
-		} else {
-			setViewTarget(1.0f, ofVec2f(0, 0), true);
-		}
+		zoomToDataExtents(true);
 		break;
 
 	case CMD_TOGGLE_DEBUG: // 'd'
@@ -2281,12 +2319,64 @@ void ofApp::keyPressed(int key) {
 		if (!ofGetKeyPressed(OF_KEY_SHIFT)) {
 			auto targetPath = selectedPath ? selectedPath : (!paths.empty() ? paths[0] : nullptr);
 			if (targetPath) {
-				if (key == OF_KEY_UP) {
-					targetPath->speed += 0.1f;
-				} else if (key == OF_KEY_DOWN) {
-					targetPath->speed -= 0.1f;
-					if (targetPath->speed < 0.0f) targetPath->speed = 0.0f;
+				if (key == OF_KEY_LEFT || key == OF_KEY_RIGHT || key == OF_KEY_UP || key == OF_KEY_DOWN) {
+					// Match r+drag / v+drag mappings: linear steps in screen-space t,
+					// log interpolation in world-parameter space.
+					float diag = 0.0f;
+					if (!points.empty()) {
+						float minX = std::numeric_limits<float>::max();
+						float maxX = std::numeric_limits<float>::lowest();
+						float minY = std::numeric_limits<float>::max();
+						float maxY = std::numeric_limits<float>::lowest();
+						for (const auto & p : points) {
+							minX = std::min(minX, p.x);
+							maxX = std::max(maxX, p.x);
+							minY = std::min(minY, p.y);
+							maxY = std::max(maxY, p.y);
+						}
+						diag = ofVec2f(maxX - minX, maxY - minY).length();
+					}
+
+					if (diag > 0.0f) {
+						float tStep = 0.01f;
+
+						if (key == OF_KEY_LEFT || key == OF_KEY_RIGHT) {
+							float minRadius = std::max(diag * 0.001f, 0.001f);
+							float maxRadius = std::max(minRadius, diag * 0.5f);
+							float ratio = maxRadius / minRadius;
+
+							if (ratio > 1.0f) {
+								float radiusClamped = std::clamp(targetPath->radius, minRadius, maxRadius);
+								float t = std::log(radiusClamped / minRadius) / std::log(ratio);
+								t += (key == OF_KEY_RIGHT) ? tStep : -tStep;
+								t = std::clamp(t, 0.0f, 1.0f);
+								targetPath->radius = minRadius * std::pow(ratio, t);
+							} else {
+								targetPath->radius = minRadius;
+							}
+						}
+
+						if (key == OF_KEY_UP || key == OF_KEY_DOWN) {
+							float minSpeed = std::max(diag * 0.00005f, 0.0001f);
+							float maxSpeed = std::max(minSpeed, diag * 0.25f);
+							float ratio = maxSpeed / minSpeed;
+
+							if (ratio > 1.0f) {
+								float speedClamped = std::clamp(targetPath->speed, minSpeed, maxSpeed);
+								float t = std::log(speedClamped / minSpeed) / std::log(ratio);
+								t += (key == OF_KEY_UP) ? tStep : -tStep;
+								t = std::clamp(t, 0.0f, 1.0f);
+								targetPath->speed = minSpeed * std::pow(ratio, t);
+							} else {
+								targetPath->speed = minSpeed;
+							}
+						}
+					}
 				}
+
+				oscManager.sendUIPathUpdate(targetPath->id, targetPath->isActive,
+					targetPath->radius, targetPath->direction, targetPath->sampleNum,
+					targetPath->volume, targetPath->falloff, targetPath->speed, targetPath->mode);
 			}
 		}
 
@@ -2738,6 +2828,37 @@ void ofApp::setViewTarget(float newZoom, const ofVec2f & newPan, bool animate) {
 	}
 }
 
+void ofApp::zoomToDataExtents(bool animate, bool includeAnnotations) {
+	if (!points.empty()) {
+		float minX = std::numeric_limits<float>::max();
+		float maxX = std::numeric_limits<float>::lowest();
+		float minY = std::numeric_limits<float>::max();
+		float maxY = std::numeric_limits<float>::lowest();
+		for (const auto & p : points) {
+			if (p.x < minX) minX = p.x;
+			if (p.x > maxX) maxX = p.x;
+			if (p.y < minY) minY = p.y;
+			if (p.y > maxY) maxY = p.y;
+		}
+
+		// Include annotation bounds only when explicitly requested and visible.
+		if (includeAnnotations && annotationManager.isVisible()) {
+			annotationManager.expandWorldBounds(minX, minY, maxX, maxY);
+		}
+
+		float dataWidth = (maxX - minX) * 1.2f;
+		float dataHeight = (maxY - minY) * 1.2f;
+		if (dataWidth <= 0) dataWidth = 1000;
+		if (dataHeight <= 0) dataHeight = 1000;
+		float newZoom = std::min(ofGetWidth() / dataWidth, ofGetHeight() / dataHeight);
+		float centerX = (minX + maxX) / 2.0f;
+		float centerY = (minY + maxY) / 2.0f;
+		setViewTarget(newZoom, ofVec2f(-centerX * newZoom, -centerY * newZoom), animate);
+	} else {
+		setViewTarget(1.0f, ofVec2f(0, 0), animate);
+	}
+}
+
 //--------------------------------------------------------------
 bool ofApp::loadPoints(string jsonPath) {
 	// Keep track of the currently loaded file for saving compositions
@@ -2791,18 +2912,21 @@ bool ofApp::loadPoints(string jsonPath) {
 		if (isLegacyArray) {
 			pointsJson = &json;
 		} else {
-			if (json.isMember("clusters")) {
+			if (json.isMember("clusters") && json["clusters"].isObject()) {
 				std::vector<std::string> clusterKeys = json["clusters"].getMemberNames();
 				for (size_t i = 0; i < clusterKeys.size(); ++i) {
 					const Json::Value & c = json["clusters"][clusterKeys[i]];
+					if (!c.isObject()) {
+						continue;
+					}
 					ClusterInfo ci;
-					ci.id = c["id"].asInt();
-					ci.label = c["label"].asString();
-					ci.member_count = c["member_count"].asInt();
+					ci.id = c.isMember("id") ? c["id"].asInt() : 0;
+					ci.label = c.isMember("label") ? c["label"].asString() : "";
+					ci.member_count = c.isMember("member_count") ? c["member_count"].asInt() : 0;
 					clusters[ci.id] = ci;
 				}
 			}
-			if (json.isMember("points")) {
+			if (json.isMember("points") && (json["points"].isArray() || json["points"].isObject())) {
 				pointsJson = &json["points"];
 			}
 		}
@@ -2810,6 +2934,10 @@ bool ofApp::loadPoints(string jsonPath) {
 		if (pointsJson && pointsJson->isArray()) {
 			for (Json::ArrayIndex i = 0; i < pointsJson->size(); ++i) {
 				const Json::Value & pt = (*pointsJson)[i];
+				if (!pt.isObject()) {
+					ofLogWarning("ofApp::loadPoints") << "Skipping non-object point at index " << i;
+					continue;
+				}
 				float x = pt["x"].asFloat();
 				float y = pt["y"].asFloat();
 				string filename = pt.isMember("file") ? pt["file"].asString() : (pt.isMember("filename") ? pt["filename"].asString() : "");
@@ -2817,22 +2945,22 @@ bool ofApp::loadPoints(string jsonPath) {
 
 				DataPoint p(x, y, filename, text);
 
+				auto parseVec2Member = [&](const Json::Value & pointObj, const char * key, const ofVec2f & fallback) {
+					if (!pointObj.isMember(key)) {
+						return fallback;
+					}
+					const Json::Value & v = pointObj[key];
+					if (!v.isArray() || v.size() < 2) {
+						ofLogWarning("ofApp::loadPoints") << "Point " << i << " has invalid '" << key << "' (expected [x,y]); using fallback";
+						return fallback;
+					}
+					return ofVec2f(v[0].asFloat(), v[1].asFloat());
+				};
+
 				// Parse new fields
-				if (pt.isMember("pos_local") && pt["pos_local"].isArray()) {
-					p.pos_local.set(pt["pos_local"][0].asFloat(), pt["pos_local"][1].asFloat());
-				} else {
-					p.pos_local.set(x, y); // Default fallback for legacy files
-				}
-				if (pt.isMember("pos_mid") && pt["pos_mid"].isArray()) {
-					p.pos_mid.set(pt["pos_mid"][0].asFloat(), pt["pos_mid"][1].asFloat());
-				} else {
-					p.pos_mid.set(x, y); // Default fallback
-				}
-				if (pt.isMember("pos_global") && pt["pos_global"].isArray()) {
-					p.pos_global.set(pt["pos_global"][0].asFloat(), pt["pos_global"][1].asFloat());
-				} else {
-					p.pos_global.set(x, y); // Default fallback for legacy files
-				}
+				p.pos_local = parseVec2Member(pt, "pos_local", ofVec2f(x, y));
+				p.pos_mid = parseVec2Member(pt, "pos_mid", ofVec2f(x, y));
+				p.pos_global = parseVec2Member(pt, "pos_global", ofVec2f(x, y));
 
 				if (pt.isMember("instability")) p.instability = pt["instability"].asFloat();
 				if (pt.isMember("cluster_id")) p.cluster_id = pt["cluster_id"].asInt();
@@ -2841,22 +2969,45 @@ bool ofApp::loadPoints(string jsonPath) {
 				if (pt.isMember("brightness")) p.brightness = pt["brightness"].asFloat();
 
 				if (pt.isMember("true_neighbors") && pt["true_neighbors"].isArray()) {
-					for (Json::ArrayIndex j = 0; j < pt["true_neighbors"].size(); ++j) {
-						p.true_neighbors.push_back(pt["true_neighbors"][j].asInt());
+					const Json::Value & neighborsArr = pt["true_neighbors"];
+					for (Json::ArrayIndex j = 0; j < neighborsArr.size(); ++j) {
+						if (neighborsArr[(int)j].isInt() || neighborsArr[(int)j].isNumeric()) {
+							p.true_neighbors.push_back(neighborsArr[(int)j].asInt());
+						}
 					}
 				}
 				if (pt.isMember("true_distances") && pt["true_distances"].isArray()) {
-					for (Json::ArrayIndex j = 0; j < pt["true_distances"].size(); ++j) {
-						p.true_distances.push_back(pt["true_distances"][j].asFloat());
+					const Json::Value & distancesArr = pt["true_distances"];
+					for (Json::ArrayIndex j = 0; j < distancesArr.size(); ++j) {
+						if (distancesArr[(int)j].isNumeric()) {
+							p.true_distances.push_back(distancesArr[(int)j].asFloat());
+						}
 					}
+				}
+
+				// Initialize render position to the currently selected cloud so auto-fit
+				// matches what will actually be shown after load.
+				switch (currentCloudMode) {
+				case PointCloudMode::LOCAL:
+					p.x = p.pos_local.x;
+					p.y = p.pos_local.y;
+					break;
+				case PointCloudMode::MID:
+					p.x = p.pos_mid.x;
+					p.y = p.pos_mid.y;
+					break;
+				case PointCloudMode::GLOBAL:
+					p.x = p.pos_global.x;
+					p.y = p.pos_global.y;
+					break;
 				}
 
 				points.push_back(p);
 
-				if (x < minX) minX = x;
-				if (x > maxX) maxX = x;
-				if (y < minY) minY = y;
-				if (y > maxY) maxY = y;
+				if (p.x < minX) minX = p.x;
+				if (p.x > maxX) maxX = p.x;
+				if (p.y < minY) minY = p.y;
+				if (p.y > maxY) maxY = p.y;
 			}
 		}
 
@@ -2902,7 +3053,7 @@ bool ofApp::loadPoints(string jsonPath) {
 			// pan = -(centerWorld * zoom)
 
 			ofVec2f newPan(-centerX * newZoom, -centerY * newZoom);
-			setViewTarget(newZoom, newPan, true);
+			setViewTarget(newZoom, newPan, false);
 
 			ofLogNotice("ofApp::loadPoints") << "Auto-framed. Target zoom: " << newZoom << " Target pan: " << newPan;
 		}
@@ -2951,8 +3102,19 @@ void ofApp::sendOscMessage(string addr, float val) {
 void ofApp::triggerVideo(const DataPoint & p) {
 	if (videoTriggerLocked) return;
 
+	// Drop-frame guard: if the app is lagging (last frame took > 40ms, i.e. <25fps),
+	// skip this trigger entirely rather than adding decoder load.
+	// This keeps playback timing smooth at the cost of skipping some clips.
+	static constexpr float kLagThresholdSec = 1.0f / 25.0f;
+	if (ofGetLastFrameTime() > kLagThresholdSec) return;
+
 	// Rate limited video switching
 	long now = ofGetElapsedTimeMillis();
+	if (videoDisplayMode.get() == 3) {
+		// Additional cap for mapped mode to reduce decoder churn.
+		if (now - lastMappedVideoSwitchTime < 120) return;
+		lastMappedVideoSwitchTime = now;
+	}
 	if (now - lastVideoSwitchTime > 50) { // 50ms limit
 		lastVideoSwitchTime = now;
 
@@ -2997,24 +3159,23 @@ void ofApp::triggerVideo(const DataPoint & p) {
 				evicted->setVolume(0);
 				ghostPlayers.push_front(evicted);
 			} else if (videoDisplayMode.get() == 3) {
-				// MAPPED MODE: recycle oldest player instead of creating new ones.
+				// MAPPED MODE: recycle oldest at front; append newest to back.
 				if (mappedPlayers.empty()) {
 					MappedClip mc;
 					mc.player = std::make_shared<ofVideoPlayer>();
 					mappedPlayers.push_back(mc);
 				}
 
-				auto evicted = mappedPlayers.back();
+				auto evicted = mappedPlayers.front();
 				evicted.player->stop();
-				evicted.player->close();
-				mappedPlayers.pop_back();
+				mappedPlayers.pop_front();
 
 				evicted.point = p;
 				evicted.player->load(videoPath);
 				evicted.player->setLoopState(OF_LOOP_NORMAL);
 				evicted.player->play();
 				evicted.player->setVolume(0);
-				mappedPlayers.push_front(evicted);
+				mappedPlayers.push_back(evicted);
 			} else {
 				videoQueue.push_back(videoPath);
 			}
@@ -3195,10 +3356,30 @@ void ofApp::saveComposition(string filepath) {
 	}
 	root["paths"] = pathsArray;
 
+	// 4. Embed annotations in composition (self-contained)
+	ofxJSONElement annotArray;
+	for (int i = 0; i < (int)annotationManager.getAnnotations().size(); ++i) {
+		const auto & a = annotationManager.getAnnotations()[i];
+		ofxJSONElement obj;
+		obj["id"]               = a.id;
+		obj["anchor_x"]         = a.anchorPoint.x;
+		obj["anchor_y"]         = a.anchorPoint.y;
+		obj["nearest_idx"]      = a.nearestPointIdx;
+		obj["label_x"]          = a.labelBoxPos.x;
+		obj["label_y"]          = a.labelBoxPos.y;
+		obj["label_is_world"]   = true;
+		obj["label_text"]       = a.labelText;
+		obj["is_cluster"]       = a.isClusterAnnotation;
+		obj["cluster_id"]       = a.clusterId;
+		annotArray.append(obj);
+	}
+	root["annotations"] = annotArray;
+
 	// Save to disk
 	bool success = root.save(filepath, true);
 	if (success) {
-		ofLogNotice("ofApp::saveComposition") << "Successfully saved composition to " << filepath;
+		ofLogNotice("ofApp::saveComposition") << "Successfully saved composition to " << filepath
+			<< " (with " << annotationManager.getAnnotations().size() << " annotations)";
 	} else {
 		ofLogError("ofApp::saveComposition") << "Failed to save composition to " << filepath;
 	}
@@ -3262,12 +3443,7 @@ void ofApp::loadCompositionOrPoints(string filepath) {
 		oscManager.sendUIPathAdd(p0->name);
 		paths.push_back(p0);
 
-		// 3. Restore settings
-		if (root.isMember("settings")) {
-			float restoredZoom = root["settings"]["zoom"].asFloat();
-			ofVec2f restoredPan(root["settings"]["pan_x"].asFloat(), root["settings"]["pan_y"].asFloat());
-			setViewTarget(restoredZoom, restoredPan, true);
-		}
+		// 3. Ignore saved pan/zoom and always fit to point-cloud extents on load.
 
 		// 4. Restore paths
 		if (root.isMember("paths") && root["paths"].isArray()) {
@@ -3351,6 +3527,26 @@ void ofApp::loadCompositionOrPoints(string filepath) {
 				sendFullUIUpdate(newPath);
 			}
 		}
+
+		// 5. Load annotations from composition JSON (not from global file)
+		if (root.isMember("annotations") && root["annotations"].isArray()) {
+			annotationManager.loadFromJSON(root["annotations"], points);
+			ofLogNotice("ofApp::loadCompositionOrPoints") << "Loaded " 
+				<< annotationManager.getAnnotations().size() << " annotations from composition.";
+		} else {
+			// No annotations in composition; start with empty
+			annotationManager.clearAnnotations();
+		}
+
+		// Register cluster annotations for any labelled clusters
+		for (const auto & kv : clusters) {
+			if (!kv.second.label.empty()) {
+				annotationManager.addClusterAnnotation(kv.second.id, kv.second.label, points);
+			}
+		}
+
+		// Auto-fit loaded composition to point extents immediately.
+		zoomToDataExtents(false, false);
 
 		ofLogNotice("ofApp::loadCompositionOrPoints") << "Composition loaded successfully!";
 	} else {

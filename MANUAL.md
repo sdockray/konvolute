@@ -38,8 +38,15 @@ This manual summarizes keyboard shortcuts and gestural controls for performance 
 - `Shift + Left Arrow`: Select previous path
 - `Shift + Right Arrow`: Select next path
 - `Shift + Down Arrow`: Deselect all paths
-- `Up Arrow`: Increase speed on selected path (or `path-0`)
-- `Down Arrow`: Decrease speed on selected path (or `path-0`)
+- `Left Arrow`: Decrease radius on selected path (or `path-0`) with fine control
+- `Right Arrow`: Increase radius on selected path (or `path-0`) with fine control
+- `Up Arrow`: Increase speed on selected path (or `path-0`) with fine control
+- `Down Arrow`: Decrease speed on selected path (or `path-0`) with fine control
+
+Arrow fine-control notes:
+
+- Left/Right and Up/Down step linearly through normalized control space (1% per keypress) and map to parameter values using the same curve as drag controls.
+- `Shift + Left/Right` keeps path-cycling behavior and does not change radius.
 
 ### Data and Session
 
@@ -130,7 +137,7 @@ Typing controls:
 ### Drag Modifiers
 
 - Hold `r` then drag vertically: adjust selected path radius
-- Hold `v` then drag vertically: adjust speed (selected path) or volume (`path-0` fallback)
+- Hold `v` then drag vertically: adjust path speed on selected path (or `path-0` fallback)
 
 ## Additional Behavior Notes
 
@@ -138,3 +145,4 @@ Typing controls:
 - Grid is hidden when no point cloud/composition is loaded.
 - Zoom and pan transitions are animated.
 - Zoom-to-extents includes annotation bounds only when annotations are visible.
+- Point-state styling uses settings colors/sizes in draw: base points use `Point Color`, hovered points use `Hovered Color` + `Hover Point Size`, selected points use `Selected Color` + `Sel Point Size`, and auto-active points use `Active Point Color`.

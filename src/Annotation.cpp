@@ -751,3 +751,54 @@ void AnnotationManager::loadFromFile(const std::string & path,
     ofLogNotice("AnnotationManager") << "Loaded " << annotations.size()
         << " annotations from " << path;
 }
+
+//--------------------------------------------------------------
+void AnnotationManager::loadFromJSON(const ofxJSONElement & annotArray,
+                                     const std::vector<DataPoint> & points)
+{
+    // Load annotations from a JSON array element (used when loading from composition)
+    annotations.clear();
+    nextId = 0;
+
+    if (!annotArray.isArray()) return;
+
+    for (int i = 0; i < (int)annotArray.size(); ++i) {
+        const ofxJSONElement & obj = annotArray[i];
+        Annotation a;
+        if (obj.isMember("id"))          a.id               = obj["id"].asInt();
+        if (obj.isMember("anchor_x"))    a.anchorPoint.x    = obj["anchor_x"].asFloat();
+        if (obj.isMember("anchor_y"))    a.anchorPoint.y    = obj["anchor_y"].asFloat();
+        if (obj.isMember("nearest_idx")) a.nearestPointIdx  = obj["nearest_idx"].asInt();
+        if (obj.isMember("label_x"))     a.labelBoxPos.x    = obj["label_x"].asFloat();
+        if (obj.isMember("label_y"))     a.labelBoxPos.y    = obj["label_y"].asFloat();
+        bool labelIsWorld = obj.isMember("label_is_world") ? obj["label_is_world"].asBool() : false;
+        if (obj.isMember("label_text"))  a.labelText        = obj["label_text"].asString();
+        if (obj.isMember("is_cluster"))  a.isClusterAnnotation = obj["is_cluster"].asBool();
+        if (obj.isMember("cluster_id"))  a.clusterId        = obj["cluster_id"].asInt();
+
+        // Backward compatibility: older files stored label box coordinates in
+        // screen space. New files set label_is_world=true.
+        if (!labelIsWorld) {
+            a.labelBoxPos = screenToWorld(a.labelBoxPos);
+        }
+
+        // Never load unclustered-bucket annotations (cluster_id == -1);
+        // they were blocked at creation time but may exist in older save files.
+        if (a.isClusterAnnotation && a.clusterId == -1) continue;
+
+        // Validate nearestPointIdx
+        if (a.nearestPointIdx >= (int)points.size()) a.nearestPointIdx = -1;
+
+        glm::vec2 minPt, maxPt;
+        if (computePointsBounds(points, minPt, maxPt)) {
+            clampAnnotationLabelToBounds(a, minPt, maxPt);
+        }
+
+        recomputeControlPoint(a);
+        if (a.id >= nextId) nextId = a.id + 1;
+        annotations.push_back(a);
+    }
+
+    ofLogNotice("AnnotationManager") << "Loaded " << annotations.size()
+        << " annotations from JSON.";
+}

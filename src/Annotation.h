@@ -88,9 +88,23 @@ public:
     void saveToFile(const std::string & path);
     void loadFromFile(const std::string & path,
                       const std::vector<DataPoint> & points);
+    void loadFromJSON(const ofxJSONElement & annotArray,
+                      const std::vector<DataPoint> & points);
 
     // Expand world bounds to include annotation anchors and label boxes.
     void expandWorldBounds(float & minX, float & minY, float & maxX, float & maxY) const;
+
+    // Accessors for composition persistence
+    const std::vector<Annotation>& getAnnotations() const { return annotations; }
+    void clearAnnotations() { annotations.clear(); }
+
+    // Helper for composition load validation
+    bool computePointsBounds(const std::vector<DataPoint> & points,
+                             glm::vec2 & minPt,
+                             glm::vec2 & maxPt) const;
+    void clampAnnotationLabelToBounds(Annotation & a,
+                                      const glm::vec2 & minPt,
+                                      const glm::vec2 & maxPt) const;
 
 private:
     // ---- State machine ----
@@ -134,13 +148,6 @@ private:
     // Find nearest DataPoint to a world-space position
     int nearestPointTo(glm::vec2 worldPos,
                        const std::vector<DataPoint> & points) const;
-
-    bool computePointsBounds(const std::vector<DataPoint> & points,
-                             glm::vec2 & minPt,
-                             glm::vec2 & maxPt) const;
-    void clampAnnotationLabelToBounds(Annotation & a,
-                                      const glm::vec2 & minPt,
-                                      const glm::vec2 & maxPt) const;
 
     // Draw helpers
     void drawCurve(const Annotation & a, float alpha) const;

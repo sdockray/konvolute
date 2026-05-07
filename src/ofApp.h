@@ -152,6 +152,8 @@ public:
 	bool showDebug;
 	bool showHelp;
 	long lastVideoSwitchTime;
+	long lastMappedVideoSwitchTime = 0;
+	uint64_t mappedLowFpsLastUpdateMs = 0;
 	string mediaRoot;
 	string lastAttemptedVideoPath;
 
@@ -175,7 +177,7 @@ public:
 		DataPoint point;
 		std::shared_ptr<ofVideoPlayer> player;
 	};
-	std::deque<MappedClip> mappedPlayers; // oldest at back, newest at front
+	std::deque<MappedClip> mappedPlayers; // oldest at front, newest at back
 
 	// Tile Collage Mode State (mode 4)
 	static constexpr int kCollageCols = 5;
@@ -243,6 +245,7 @@ public:
 	// Helpers
 	ofVec2f screenToWorld(float x, float y);
 	void setViewTarget(float newZoom, const ofVec2f & newPan, bool animate = true);
+	void zoomToDataExtents(bool animate = true, bool includeAnnotations = true);
 	bool loadPoints(string jsonPath);
 	void sendOscMessage(string num, float val);
 	void triggerVideo(const DataPoint & p);

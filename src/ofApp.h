@@ -67,6 +67,13 @@ public:
 
 	// Interaction State
 	DrawMode currentMode;
+	bool isLoadDialogOpen = false;
+	bool isLoadOverlayOpen = false;
+	std::string loadOverlayCurrentDir;
+	std::vector<std::string> loadOverlayEntries;
+	std::vector<bool> loadOverlayEntryIsDirectory;
+	int loadOverlaySelectedIndex = 0;
+	int loadOverlayScrollOffset = 0;
 	bool isDrawingPath;
 	int pathIdCounter;
 	bool bHoldingR = false;
@@ -246,11 +253,15 @@ public:
 	ofVec2f screenToWorld(float x, float y);
 	void setViewTarget(float newZoom, const ofVec2f & newPan, bool animate = true);
 	void zoomToDataExtents(bool animate = true, bool includeAnnotations = true);
-	bool loadPoints(string jsonPath);
+	bool loadPoints(string jsonPath, bool loadGlobalAnnotations = true);
 	void sendOscMessage(string num, float val);
 	void triggerVideo(const DataPoint & p);
 	void sendFullUIUpdate(std::shared_ptr<PathObject> p);
 	void stopPathSamples(std::shared_ptr<PathObject> p);
+	void updateGridSpacingRangeFromExtents(float minX, float minY, float maxX, float maxY);
+	void refreshLoadOverlayCandidates();
+	void openLoadOverlayPath(const std::string & path);
+	void closeLoadOverlay();
 	std::shared_ptr<PathObject> createWanderingPath(const DataPoint & start,
 		int maxPoints, float randomness, int numNeighbors);
 

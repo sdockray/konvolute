@@ -1,6 +1,8 @@
 #include "ofApp.h"
+#include "MacAsyncFileDialog.h"
 #include "ofAppGLFWWindow.h"
 #include "ofxJSON.h"
+#include <filesystem>
 
 // Natural Sort Helper
 int naturalCompare(const std::string & s1, const std::string & s2) {
@@ -29,10 +31,22 @@ int naturalCompare(const std::string & s1, const std::string & s2) {
 	return (int)(s1.length() - s2.length());
 }
 
+static std::string getParentDirectoryPath(const std::string & dirPath) {
+	if (dirPath.empty()) return "";
+	std::filesystem::path p(dirPath);
+	p = p.lexically_normal();
+	std::filesystem::path parent = p.parent_path();
+	if (parent.empty() || parent == p) return "";
+	std::string out = parent.string();
+	if (!out.empty() && out.back() != '/') out += "/";
+	return out;
+}
+
 //--------------------------------------------------------------
 void ofApp::setup() {
 	ofSetBackgroundColor(20, 25, 40);
 	ofSetFrameRate(60);
+	ofSetEscapeQuitsApp(false);
 
 	// Initialize OSC
 	// SC: 57120, UI: 57122, Listen: 57121
@@ -1211,7 +1225,7 @@ void ofApp::drawVisuals() {
 	// Draw grid above video and below points. We project world-grid lines into
 	// screen space so changing spacing is immediately visible.
 	{
-		float worldSpacing = std::max(0.1f, (float)gridSpacing.get());
+		float worldSpacing = std::max(1e-6f, (float)gridSpacing.get());
 		ofColor gc = gridColor.get();
 		if (gc.a > 0 && !points.empty()) {
 			ofVec2f tl = screenToWorld(0, 0);
@@ -1646,15 +1660,16 @@ void ofApp::drawVisuals() {
 	}
 	ofDrawBitmapString("3D Dim: " + dimStr, 20, 80);
 	ofDrawBitmapString("Audio Mode: " + string(defaultPathMode == PathObject::LOOP_MODE ? "LOOP" : "ONCE"), 20, 100);
+	ofDrawBitmapString("Annotation Mode (Tab): " + string(annotationManager.isEnabled() ? "ON" : "OFF"), 20, 120);
 	{
 		string nbStr = neighbourModeActive ? "ON" : "OFF";
 		if (neighbourModeActive && selectedPointIdx >= 0 && selectedPointIdx < (int)points.size()) {
 			nbStr += " | " + ofFilePath::getFileName(points[selectedPointIdx].filename);
 		}
-		ofDrawBitmapString("Neighbour Mode (N): " + nbStr, 20, 120);
+		ofDrawBitmapString("Neighbour Mode (N): " + nbStr, 20, 140);
 	}
 
-	int textY = 140;
+	int textY = 160;
 	if (selectedPath) {
 		ofDrawBitmapString("Selected: " + selectedPath->name + " - Video: " + (selectedPath->sendToVideo ? "ON" : "OFF"), 20, textY);
 		textY += 20;
@@ -1793,6 +1808,98 @@ void ofApp::drawVisuals() {
 		ofDrawBitmapString("Press H to close", lx, ly);
 		ofDisableBlendMode();
 	}
+
+	// Draw mouse cursor crosshair (visible on both main and projector windows)
+	{
+		float mouseX = ofGetMouseX();
+		float mouseY = ofGetMouseY();
+		float crosshairSize = 12.0f; // Half-length of crosshair arms
+		
+		ofSetColor(255, 255, 255, 200); // White with slight transparency
+		ofSetLineWidth(2.0f);
+		ofNoFill();
+		
+		// Draw a + (plus) crosshair
+		ofDrawLine(mouseX - crosshairSize, mouseY, mouseX + crosshairSize, mouseY); // Horizontal
+		ofDrawLine(mouseX, mouseY - crosshairSize, mouseX, mouseY + crosshairSize); // Vertical
+		
+		// Optional: draw a small circle around the center
+		ofDrawCircle(mouseX, mouseY, 4.0f);
+		
+		ofSetLineWidth(1.0f); // Reset
+	}
+
+	if (isLoadOverlayOpen) {
+		ofEnableBlendMode(OF_BLENDMODE_ALPHA);
+		ofSetColor(0, 0, 0, 255);
+		ofDrawRectangle(0, 0, ofGetWidth(), ofGetHeight());
+
+		float panelW = std::min(760.0f, ofGetWidth() * 0.86f);
+		float rowH = 24.0f;
+		int visibleRows = 18;
+		int entryCount = (int)loadOverlayEntries.size();
+		int rowsToDraw = std::min(visibleRows, std::max(1, entryCount));
+		float panelH = 136.0f + rowH * rowsToDraw;
+		float panelX = (ofGetWidth() - panelW) * 0.5f;
+		float panelY = (ofGetHeight() - panelH) * 0.5f;
+
+		ofSetColor(245, 245, 245, 255);
+		ofDrawRectangle(panelX, panelY, panelW, panelH);
+		ofNoFill();
+		ofSetColor(20, 20, 20, 255);
+		ofSetLineWidth(1.0f);
+		ofDrawRectangle(panelX, panelY, panelW, panelH);
+		ofFill();
+
+		ofSetColor(10, 10, 10, 255);
+		ofDrawBitmapString("Open JSON (non-modal browser)", panelX + 16, panelY + 24);
+		ofSetColor(40, 40, 40, 255);
+		ofDrawBitmapString("Enter: open/load   Up/Down: select   Backspace/Delete: parent   O: close", panelX + 16, panelY + 44);
+
+		std::string dirLabel = loadOverlayCurrentDir;
+		if (dirLabel.size() > 96) {
+			dirLabel = "..." + dirLabel.substr(dirLabel.size() - 93);
+		}
+		ofSetColor(20, 20, 20, 255);
+		ofDrawBitmapString(dirLabel, panelX + 16, panelY + 64);
+
+		float listY = panelY + 84.0f;
+		if (loadOverlayEntries.empty()) {
+			ofSetColor(220, 130, 130);
+			ofDrawBitmapString("No folders or JSON files found here.", panelX + 16, listY + 18);
+		} else {
+			int startIndex = loadOverlayScrollOffset;
+			int endIndex = std::min(startIndex + visibleRows, entryCount);
+			for (int i = startIndex; i < endIndex; ++i) {
+				int row = i - startIndex;
+				float rowY = listY + row * rowH;
+				if (i == loadOverlaySelectedIndex) {
+					ofSetColor(90, 130, 190, 255);
+					ofDrawRectangle(panelX + 8, rowY, panelW - 16, rowH - 2);
+				}
+
+				ofSetColor(20, 20, 20, 255);
+				std::string label = ofFilePath::getFileName(loadOverlayEntries[i]);
+				std::string parentPath = getParentDirectoryPath(loadOverlayCurrentDir);
+				if (!parentPath.empty() && loadOverlayEntryIsDirectory[i] && loadOverlayEntries[i] == parentPath) {
+					label = "..";
+				}
+				if (loadOverlayEntryIsDirectory[i]) {
+					if (label.empty()) label = loadOverlayEntries[i];
+					label = "[DIR] " + label;
+				}
+				if (label.size() > 88) {
+					label = label.substr(0, 85) + "...";
+				}
+				ofDrawBitmapString(label, panelX + 16, rowY + 16);
+			}
+
+			if (entryCount > visibleRows) {
+				ofSetColor(40, 40, 40, 255);
+				ofDrawBitmapString(ofToString(loadOverlaySelectedIndex + 1) + "/" + ofToString(entryCount), panelX + panelW - 90, panelY + panelH - 10);
+			}
+		}
+	}
 }
 
 //--------------------------------------------------------------
@@ -1818,6 +1925,54 @@ void ofApp::exit() {
 //--------------------------------------------------------------
 void ofApp::keyPressed(int key) {
 	inputManager.updateModifiers(key, true);
+
+	if (isLoadOverlayOpen) {
+		if (key == 'o' || key == 'O') {
+			closeLoadOverlay();
+			return;
+		}
+
+		if (key == OF_KEY_BACKSPACE || key == OF_KEY_DEL || key == OF_KEY_LEFT || key == 127 || key == 8 || key == 63272 || key == 65535) {
+			std::string parent = getParentDirectoryPath(loadOverlayCurrentDir);
+			if (!parent.empty() && parent != loadOverlayCurrentDir) {
+				openLoadOverlayPath(parent);
+			}
+			return;
+		}
+
+		if (key == OF_KEY_UP && !loadOverlayEntries.empty()) {
+			loadOverlaySelectedIndex--;
+			if (loadOverlaySelectedIndex < 0) {
+				loadOverlaySelectedIndex = (int)loadOverlayEntries.size() - 1;
+			}
+			if (loadOverlaySelectedIndex < loadOverlayScrollOffset) {
+				loadOverlayScrollOffset = loadOverlaySelectedIndex;
+			}
+			return;
+		}
+
+		if (key == OF_KEY_DOWN && !loadOverlayEntries.empty()) {
+			loadOverlaySelectedIndex = (loadOverlaySelectedIndex + 1) % (int)loadOverlayEntries.size();
+			int visibleRows = 18;
+			if (loadOverlaySelectedIndex >= loadOverlayScrollOffset + visibleRows) {
+				loadOverlayScrollOffset = loadOverlaySelectedIndex - visibleRows + 1;
+			}
+			return;
+		}
+
+		if ((key == OF_KEY_RETURN || key == '\n' || key == '\r' || key == OF_KEY_RIGHT) && !loadOverlayEntries.empty()) {
+			std::string chosen = loadOverlayEntries[loadOverlaySelectedIndex];
+			if (loadOverlayEntryIsDirectory[loadOverlaySelectedIndex]) {
+				openLoadOverlayPath(chosen);
+			} else {
+				closeLoadOverlay();
+				loadCompositionOrPoints(chosen);
+			}
+			return;
+		}
+
+		return;
+	}
 
 	// Annotation system gets first crack — when typing, it consumes all keys
 	if (annotationManager.onKeyPressed(key, points)) return;
@@ -1877,6 +2032,7 @@ void ofApp::keyPressed(int key) {
 
 	case CMD_LOAD_POINTS: // 'o'
 	{
+		closeLoadOverlay();
 		ofFileDialogResult result = ofSystemLoadDialog("Select JSON Data or Composition File");
 		if (result.bSuccess) {
 			loadCompositionOrPoints(result.getPath());
@@ -2082,7 +2238,6 @@ void ofApp::keyPressed(int key) {
 
 	case CMD_NEIGHBOUR_PLAY_SEQ:
 		if (!neighbourModeActive) {
-			// Fall through to title toggle when neighbour mode is off
 			showTitle = !showTitle;
 		} else if (selectedPointIdx >= 0 && selectedPointIdx < (int)points.size()) {
 			// Build queue sorted by ascending distance
@@ -2432,6 +2587,44 @@ void ofApp::keyReleased(int key) {
 
 //--------------------------------------------------------------
 void ofApp::mousePressed(int x, int y, int button) {
+	if (isLoadOverlayOpen) {
+		float panelW = std::min(760.0f, ofGetWidth() * 0.86f);
+		float rowH = 24.0f;
+		int visibleRows = 18;
+		int entryCount = (int)loadOverlayEntries.size();
+		int rowsToDraw = std::min(visibleRows, std::max(1, entryCount));
+		float panelH = 136.0f + rowH * rowsToDraw;
+		float panelX = (ofGetWidth() - panelW) * 0.5f;
+		float panelY = (ofGetHeight() - panelH) * 0.5f;
+
+		if (x < panelX || x > panelX + panelW || y < panelY || y > panelY + panelH) {
+			closeLoadOverlay();
+			return;
+		}
+
+		float listY = panelY + 84.0f;
+		int startIndex = loadOverlayScrollOffset;
+		int endIndex = std::min(startIndex + visibleRows, entryCount);
+		for (int i = startIndex; i < endIndex; ++i) {
+			int row = i - startIndex;
+			float rowTop = listY + row * rowH;
+			if (y >= rowTop && y < rowTop + rowH) {
+				loadOverlaySelectedIndex = i;
+				if (button == 0 && loadOverlaySelectedIndex >= 0 && loadOverlaySelectedIndex < entryCount) {
+					std::string chosen = loadOverlayEntries[loadOverlaySelectedIndex];
+					if (loadOverlayEntryIsDirectory[loadOverlaySelectedIndex]) {
+						openLoadOverlayPath(chosen);
+					} else {
+						closeLoadOverlay();
+						loadCompositionOrPoints(chosen);
+					}
+				}
+				return;
+			}
+		}
+		return;
+	}
+
 	// Forward to annotation system first
 	if (annotationManager.onMousePressed(glm::vec2(x, y), button)) return;
 
@@ -2828,6 +3021,114 @@ void ofApp::setViewTarget(float newZoom, const ofVec2f & newPan, bool animate) {
 	}
 }
 
+void ofApp::updateGridSpacingRangeFromExtents(float minX, float minY, float maxX, float maxY) {
+	float width = std::max(0.0f, maxX - minX);
+	float height = std::max(0.0f, maxY - minY);
+	float diag = std::sqrt(width * width + height * height);
+	if (diag <= 0.0f) {
+		diag = 1.0f;
+	}
+
+	float minSpacing = std::max(diag / 500.0f, 1e-6f);
+	float maxSpacing = std::max(diag / 5.0f, minSpacing);
+
+	gridSpacing.setMin(minSpacing);
+	gridSpacing.setMax(maxSpacing);
+
+	float clamped = std::clamp((float)gridSpacing.get(), minSpacing, maxSpacing);
+	if (std::abs(clamped - gridSpacing.get()) > std::numeric_limits<float>::epsilon()) {
+		gridSpacing = clamped;
+	}
+}
+
+void ofApp::refreshLoadOverlayCandidates() {
+	loadOverlayEntries.clear();
+	loadOverlayEntryIsDirectory.clear();
+
+	if (loadOverlayCurrentDir.empty()) {
+		loadOverlayCurrentDir = ofFilePath::getUserHomeDir();
+	}
+
+	ofDirectory dir(loadOverlayCurrentDir);
+	if (ofFile(loadOverlayCurrentDir).isFile()) {
+		ofFile f(loadOverlayCurrentDir);
+		loadOverlayCurrentDir = f.getEnclosingDirectory();
+		dir.open(loadOverlayCurrentDir);
+	}
+	if (!dir.exists()) {
+		loadOverlaySelectedIndex = 0;
+		loadOverlayScrollOffset = 0;
+		return;
+	}
+
+	std::string normalizedDir = dir.getAbsolutePath();
+	if (!normalizedDir.empty()) {
+		if (normalizedDir.back() != '/') normalizedDir += "/";
+		loadOverlayCurrentDir = normalizedDir;
+	}
+
+	// Parent directory shortcut
+	{
+		std::string parent = getParentDirectoryPath(loadOverlayCurrentDir);
+		if (!parent.empty() && parent != loadOverlayCurrentDir) {
+			loadOverlayEntries.push_back(parent);
+			loadOverlayEntryIsDirectory.push_back(true);
+		}
+	}
+
+	dir.listDir();
+	std::vector<std::string> directories;
+	std::vector<std::string> jsonFiles;
+	for (auto & file : dir.getFiles()) {
+		if (file.isDirectory()) {
+			directories.push_back(file.getAbsolutePath());
+		} else if (file.isFile()) {
+			std::string ext = ofToLower(ofFilePath::getFileExt(file.getFileName()));
+			if (ext == "json") {
+				jsonFiles.push_back(file.getAbsolutePath());
+			}
+		}
+	}
+
+	std::sort(directories.begin(), directories.end());
+	std::sort(jsonFiles.begin(), jsonFiles.end());
+
+	for (const auto & d : directories) {
+		loadOverlayEntries.push_back(d);
+		loadOverlayEntryIsDirectory.push_back(true);
+	}
+	for (const auto & f : jsonFiles) {
+		loadOverlayEntries.push_back(f);
+		loadOverlayEntryIsDirectory.push_back(false);
+	}
+
+	if (loadOverlayEntries.empty()) {
+		loadOverlaySelectedIndex = 0;
+		loadOverlayScrollOffset = 0;
+	} else {
+		loadOverlaySelectedIndex = std::clamp(loadOverlaySelectedIndex, 0, (int)loadOverlayEntries.size() - 1);
+		loadOverlayScrollOffset = std::clamp(loadOverlayScrollOffset, 0, std::max(0, (int)loadOverlayEntries.size() - 1));
+		if (loadOverlaySelectedIndex < loadOverlayScrollOffset) {
+			loadOverlayScrollOffset = loadOverlaySelectedIndex;
+		}
+	}
+}
+
+void ofApp::openLoadOverlayPath(const std::string & path) {
+	loadOverlayCurrentDir = path;
+	loadOverlaySelectedIndex = 0;
+	loadOverlayScrollOffset = 0;
+	refreshLoadOverlayCandidates();
+}
+
+void ofApp::closeLoadOverlay() {
+	isLoadOverlayOpen = false;
+	loadOverlayEntries.clear();
+	loadOverlayEntryIsDirectory.clear();
+	loadOverlaySelectedIndex = 0;
+	loadOverlayScrollOffset = 0;
+}
+
 void ofApp::zoomToDataExtents(bool animate, bool includeAnnotations) {
 	if (!points.empty()) {
 		float minX = std::numeric_limits<float>::max();
@@ -2860,7 +3161,7 @@ void ofApp::zoomToDataExtents(bool animate, bool includeAnnotations) {
 }
 
 //--------------------------------------------------------------
-bool ofApp::loadPoints(string jsonPath) {
+bool ofApp::loadPoints(string jsonPath, bool loadGlobalAnnotations) {
 	// Keep track of the currently loaded file for saving compositions
 	lastLoadedPointsPath = jsonPath;
 
@@ -3014,6 +3315,10 @@ bool ofApp::loadPoints(string jsonPath) {
 		ofLogNotice("ofApp::loadPoints") << "Loaded " << points.size() << " points.";
 		ofLogNotice("ofApp::loadPoints") << "Bounds: [" << minX << ", " << minY << "] to [" << maxX << ", " << maxY << "]";
 
+		if (!points.empty()) {
+			updateGridSpacingRangeFromExtents(minX, minY, maxX, maxY);
+		}
+
 		// Auto-frame
 		if (!points.empty()) {
 			float dataWidth = maxX - minX;
@@ -3070,9 +3375,13 @@ bool ofApp::loadPoints(string jsonPath) {
 		std::sort(sortedClusterIds.begin(), sortedClusterIds.end());
 		activeClusterId = -999; // Reset filter on new load
 
-		// Restore saved annotations now that points exist to anchor them to.
-		// This also clears any previously loaded annotations when a new file is opened.
-		annotationManager.loadFromFile("annotations.json", points);
+		// Legacy global annotations are optional and intentionally disabled when
+		// loading compositions so annotation state comes only from the composition file.
+		if (loadGlobalAnnotations) {
+			annotationManager.loadFromFile("annotations.json", points);
+		} else {
+			annotationManager.clearAnnotations();
+		}
 
 		// Register cluster annotations for any labelled clusters
 		for (const auto & kv : clusters) {
@@ -3415,7 +3724,7 @@ void ofApp::loadCompositionOrPoints(string filepath) {
 			}
 		}
 
-		if (!loadPoints(targetPointsFile)) {
+		if (!loadPoints(targetPointsFile, false)) {
 			// If loadPoints fails (e.g. wrong file type), abort composition load
 			ofLogError("ofApp::loadCompositionOrPoints") << "Failed to load points data. Aborting composition load.";
 			return;
@@ -3552,6 +3861,6 @@ void ofApp::loadCompositionOrPoints(string filepath) {
 	} else {
 		// 2. Otherwise, treat it as a standard raw points file
 		ofLogNotice("ofApp::loadCompositionOrPoints") << "No composition metadata found; treating as raw points file.";
-		loadPoints(filepath);
+		loadPoints(filepath, true);
 	}
 }

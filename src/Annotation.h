@@ -117,6 +117,8 @@ private:
     bool enabled  = false;
     bool visible  = true;
     int  nextId   = 0;
+	uint64_t lastEmptyClickMs = 0;
+	glm::vec2 lastEmptyClickPos { -10000.0f, -10000.0f };
 
     // Blink cursor timer
     uint64_t typingStartMs = 0;

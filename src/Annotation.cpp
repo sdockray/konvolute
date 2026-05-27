@@ -24,6 +24,8 @@ static constexpr int   kBezierSteps   = 24;
 
 // Hit tests
 static constexpr float kCurveHitThreshold = 8.0f;
+static constexpr uint64_t kCreateDoubleClickMs = 320;
+static constexpr float kCreateDoubleClickPx = 10.0f;
 
 // Opacity when annotation mode is off
 static constexpr float kInactiveAlpha = 0.55f;
@@ -387,7 +389,22 @@ bool AnnotationManager::onMousePressed(glm::vec2 pos, int button) {
         return true;
     }
 
-    // Empty space -> create new annotation
+    // Empty space -> create new annotation only on double-click.
+    uint64_t nowMs = ofGetElapsedTimeMillis();
+    bool isDoubleClick = (button == 0)
+        && (nowMs - lastEmptyClickMs <= kCreateDoubleClickMs)
+        && (glm::distance(pos, lastEmptyClickPos) <= kCreateDoubleClickPx);
+
+    lastEmptyClickMs = nowMs;
+    lastEmptyClickPos = pos;
+
+    if (!isDoubleClick) {
+        // Consume single-clicks while in annotation mode to avoid accidental
+        // path edits/selections underneath.
+        return true;
+    }
+
+    // Double-click on empty space -> create new annotation
     glm::vec2 worldPos = screenToWorld(pos);
     Annotation a;
     a.id              = nextId++;

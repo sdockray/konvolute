@@ -29,6 +29,17 @@ enum class ThirdDimMode {
 	BRIGHTNESS
 };
 
+enum class PointGlyphMode {
+	CIRCLE = 0,
+	SQUARE,
+	X_MARK,
+	NUMBER,
+	CLUSTER_NUMBER,
+	EMOJI,
+	THUMBNAIL,
+	MIXED
+};
+
 class ofApp : public ofBaseApp {
 
 public:
@@ -82,6 +93,7 @@ public:
 
 	PointCloudMode currentCloudMode = PointCloudMode::MID;
 	ThirdDimMode currentThirdDimMode = ThirdDimMode::NONE;
+	PointGlyphMode pointGlyphMode = PointGlyphMode::CIRCLE;
 	int activeClusterId = -999; // Sentinel: no cluster filter active
 	std::vector<int> sortedClusterIds; // Cached sorted list of cluster ids for stepping
 
@@ -112,6 +124,13 @@ public:
 	std::unordered_set<DataPoint> mouseActivePoints;
 	float dataVisualAlpha = 1.0f;
 	float targetDataVisualAlpha = 1.0f;
+	bool emojiGlyphLikelySupported = false;
+	size_t thumbnailCacheBudget = 1024;
+	int thumbnailLoadsPerFrame = 24;
+	std::unordered_map<std::string, std::shared_ptr<ofImage>> thumbnailCache;
+	std::unordered_map<std::string, uint64_t> thumbnailCacheLastUsed;
+	std::unordered_map<std::string, std::string> thumbnailPathByFilename;
+	std::shared_ptr<ofVideoPlayer> thumbnailExtractor;
 
 	// Browse Mode
 	DataPoint hoveredPoint;
@@ -237,6 +256,7 @@ public:
 	ofParameter<float> cloudTransitionSpeed; // transition speed between clouds
 
 	ofParameter<int> videoDisplayMode; // 0=single, 1=grid, 2=ghost, 3=mapped, 4=collage
+	ofParameter<int> pointGlyphMode_param; // 0=circle 1=square 2=x 3=number 4=cluster 5=emoji 6=thumb 7=mixed
 	ofParameter<int> macroblockSize;
 	ofParameter<float> macroblockThreshold;
 	ofParameter<float> datamoshDecay;
@@ -262,6 +282,11 @@ public:
 	void refreshLoadOverlayCandidates();
 	void openLoadOverlayPath(const std::string & path);
 	void closeLoadOverlay();
+	std::string resolveThumbnailPathForPoint(const DataPoint & p);
+	std::string findVideoSegmentPath(const std::string & baseName) const;
+	bool ensureImageSegmentForBaseName(const std::string & baseName);
+	std::shared_ptr<ofImage> getThumbnailCached(const std::string & path, int & loadsRemaining);
+	void pruneThumbnailCache();
 	std::shared_ptr<PathObject> createWanderingPath(const DataPoint & start,
 		int maxPoints, float randomness, int numNeighbors);
 

@@ -2,7 +2,160 @@
 #include "MacAsyncFileDialog.h"
 #include "ofAppGLFWWindow.h"
 #include "ofxJSON.h"
+#include <array>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
+#include <sstream>
+#include <unistd.h>
+
+static uint32_t stableStringHash(const std::string & s) {
+	uint32_t h = 2166136261u;
+	for (unsigned char c : s) {
+		h ^= c;
+		h *= 16777619u;
+	}
+	return h;
+}
+
+static std::string pointGlyphModeName(PointGlyphMode mode) {
+	switch (mode) {
+	case PointGlyphMode::CIRCLE: return "CIRCLE";
+	case PointGlyphMode::SQUARE: return "SQUARE";
+	case PointGlyphMode::X_MARK: return "X";
+	case PointGlyphMode::NUMBER: return "NUMBER";
+	case PointGlyphMode::CLUSTER_NUMBER: return "CLUSTER";
+	case PointGlyphMode::EMOJI: return "EMOJI";
+	case PointGlyphMode::THUMBNAIL: return "THUMB";
+	case PointGlyphMode::MIXED: return "MIXED";
+	default: return "CIRCLE";
+	}
+}
+
+static PointGlyphMode nextPointGlyphMode(PointGlyphMode mode) {
+	int v = ((int)mode + 1) % 8;
+	return (PointGlyphMode)v;
+}
+
+static std::string shellQuote(const std::string & s) {
+	std::string out = "'";
+	for (char c : s) {
+		if (c == '\'') out += "'\\''";
+		else out += c;
+	}
+	out += "'";
+	return out;
+}
+
+static bool ffmpegAvailable() {
+	static int cached = -1;
+	if (cached >= 0) return cached == 1;
+
+	auto isExec = [](const std::string & p) {
+		return !p.empty() && access(p.c_str(), X_OK) == 0;
+	};
+	auto findExec = [&](const std::string & name) {
+		const char * pathEnv = std::getenv("PATH");
+		std::vector<std::string> dirs;
+		if (pathEnv != nullptr) {
+			std::stringstream ss(pathEnv);
+			std::string item;
+			while (std::getline(ss, item, ':')) {
+				if (!item.empty()) dirs.push_back(item);
+			}
+		}
+		dirs.push_back("/opt/homebrew/bin");
+		dirs.push_back("/usr/local/bin");
+		dirs.push_back("/usr/bin");
+		dirs.push_back("/bin");
+		for (const auto & d : dirs) {
+			std::string p = d + "/" + name;
+			if (isExec(p)) return p;
+		}
+		return std::string();
+	};
+
+	std::string ffmpegPath = findExec("ffmpeg");
+	std::string ffprobePath = findExec("ffprobe");
+	cached = (!ffmpegPath.empty() && !ffprobePath.empty()) ? 1 : 0;
+	return cached == 1;
+}
+
+static std::string ffmpegExecutablePath() {
+	auto isExec = [](const std::string & p) {
+		return !p.empty() && access(p.c_str(), X_OK) == 0;
+	};
+	const char * pathEnv = std::getenv("PATH");
+	std::vector<std::string> dirs;
+	if (pathEnv != nullptr) {
+		std::stringstream ss(pathEnv);
+		std::string item;
+		while (std::getline(ss, item, ':')) {
+			if (!item.empty()) dirs.push_back(item);
+		}
+	}
+	dirs.push_back("/opt/homebrew/bin");
+	dirs.push_back("/usr/local/bin");
+	dirs.push_back("/usr/bin");
+	dirs.push_back("/bin");
+	for (const auto & d : dirs) {
+		std::string p = d + "/ffmpeg";
+		if (isExec(p)) return p;
+	}
+	return "ffmpeg";
+}
+
+static std::string ffprobeExecutablePath() {
+	auto isExec = [](const std::string & p) {
+		return !p.empty() && access(p.c_str(), X_OK) == 0;
+	};
+	const char * pathEnv = std::getenv("PATH");
+	std::vector<std::string> dirs;
+	if (pathEnv != nullptr) {
+		std::stringstream ss(pathEnv);
+		std::string item;
+		while (std::getline(ss, item, ':')) {
+			if (!item.empty()) dirs.push_back(item);
+		}
+	}
+	dirs.push_back("/opt/homebrew/bin");
+	dirs.push_back("/usr/local/bin");
+	dirs.push_back("/usr/bin");
+	dirs.push_back("/bin");
+	for (const auto & d : dirs) {
+		std::string p = d + "/ffprobe";
+		if (isExec(p)) return p;
+	}
+	return "ffprobe";
+}
+
+static double ffprobeDurationSeconds(const std::string & path) {
+	if (!ffmpegAvailable()) return 0.0;
+	std::string cmd = shellQuote(ffprobeExecutablePath())
+		+ " -v error -show_entries format=duration -of default=nk=1:nw=1 "
+		+ shellQuote(path);
+	FILE * pipe = popen(cmd.c_str(), "r");
+	if (!pipe) return 0.0;
+	char buf[256];
+	std::string out;
+	while (fgets(buf, sizeof(buf), pipe) != nullptr) {
+		out += buf;
+	}
+	pclose(pipe);
+	try {
+		return std::max(0.0, std::stod(out));
+	} catch (...) {
+		return 0.0;
+	}
+}
+
+static const std::array<std::string, 12> kEmojiGlyphs = {
+	"😀", "🔥", "✨", "🌊", "🌱", "🎵", "⚡", "🌀", "🌙", "☀", "🔷", "🍀"
+};
+
+static const std::array<std::string, 12> kEmojiFallbackGlyphs = {
+	":)", "*", "+", "~", "^", "♪", "!", "@", "o", "O", "[]", "%"
+};
 
 // Natural Sort Helper
 int naturalCompare(const std::string & s1, const std::string & s2) {
@@ -42,6 +195,353 @@ static std::string getParentDirectoryPath(const std::string & dirPath) {
 	return out;
 }
 
+std::string ofApp::findVideoSegmentPath(const std::string & baseName) const {
+	if (baseName.empty() || mediaRoot.empty()) return "";
+	std::string videoDir = mediaRoot + "video_segments/";
+	if (!ofDirectory(videoDir).exists()) return "";
+
+	static const std::vector<std::string> exts = {"mp4", "mov", "m4v", "avi", "webm"};
+	for (const auto & ext : exts) {
+		std::string p = videoDir + baseName + "." + ext;
+		if (ofFile(p).exists()) return p;
+	}
+	return "";
+}
+
+bool ofApp::ensureImageSegmentForBaseName(const std::string & baseName) {
+	if (baseName.empty() || mediaRoot.empty()) return false;
+
+	std::string imageDir = mediaRoot + "image_segments/";
+	std::string imagePath = imageDir + baseName + ".png";
+	if (ofFile(imagePath).exists()) return true;
+
+	std::string videoPath = findVideoSegmentPath(baseName);
+	if (videoPath.empty()) return false;
+
+	ofDirectory::createDirectory(imageDir, true, true);
+
+	// Preferred path: ffmpeg extraction is far more reliable than AVFoundation
+	// for offline frame capture on macOS.
+	if (ffmpegAvailable()) {
+		std::string ffmpegBin = ffmpegExecutablePath();
+		double dur = ffprobeDurationSeconds(videoPath);
+		double mid = (dur > 0.0) ? (dur * 0.5) : 0.0;
+		double start = std::max(0.0, mid - 0.75);
+		char startBuf[64];
+		snprintf(startBuf, sizeof(startBuf), "%.3f", start);
+		char midBuf[64];
+		snprintf(midBuf, sizeof(midBuf), "%.3f", std::max(0.0, mid));
+
+		std::string vf = "thumbnail=120,"
+			"scale='if(gte(iw,ih),256,-2)':'if(gte(iw,ih),-2,256)'";
+		std::string cmdAvg = shellQuote(ffmpegBin) + " -v error -y -ss " + std::string(startBuf)
+			+ " -i " + shellQuote(videoPath)
+			+ " -vf \"" + vf + "\" -frames:v 1 " + shellQuote(imagePath)
+			+ " >/dev/null 2>&1";
+
+		auto imageIsNonBlack = [&](const std::string & p) {
+			ofImage chk;
+			if (!chk.load(p) || !chk.isAllocated()) return false;
+			ofPixels & px = chk.getPixels();
+			if (!px.isAllocated() || px.getNumChannels() < 3) return false;
+			size_t stride = (size_t)px.getNumChannels();
+			size_t nPix = (size_t)px.getWidth() * (size_t)px.getHeight();
+			double sum = 0.0;
+			for (size_t i = 0; i < nPix; i += 16) {
+				size_t o = i * stride;
+				sum += 0.2126 * px[o + 0] + 0.7152 * px[o + 1] + 0.0722 * px[o + 2];
+			}
+			double cnt = std::max<size_t>(1, nPix / 16);
+			return (sum / cnt) > 2.0;
+		};
+
+		if (std::system(cmdAvg.c_str()) == 0 && ofFile(imagePath).exists() && imageIsNonBlack(imagePath)) {
+			return true;
+		}
+
+		std::string cmdMid = shellQuote(ffmpegBin) + " -v error -y -ss " + std::string(midBuf)
+			+ " -i " + shellQuote(videoPath)
+			+ " -vf \"scale='if(gte(iw,ih),256,-2)':'if(gte(iw,ih),-2,256)'\""
+			+ " -frames:v 1 " + shellQuote(imagePath)
+			+ " >/dev/null 2>&1";
+		if (std::system(cmdMid.c_str()) == 0 && ofFile(imagePath).exists() && imageIsNonBlack(imagePath)) {
+			return true;
+		}
+
+		// Extra fallback near start to avoid black fades in some media.
+		std::string cmdEarly = shellQuote(ffmpegBin) + " -v error -y -ss 0.2"
+			+ " -i " + shellQuote(videoPath)
+			+ " -vf \"scale='if(gte(iw,ih),256,-2)':'if(gte(iw,ih),-2,256)'\""
+			+ " -frames:v 1 " + shellQuote(imagePath)
+			+ " >/dev/null 2>&1";
+		if (std::system(cmdEarly.c_str()) == 0 && ofFile(imagePath).exists() && imageIsNonBlack(imagePath)) {
+			return true;
+		}
+	}
+
+	if (!thumbnailExtractor) return false;
+
+	if (thumbnailExtractor->isLoaded()) {
+		thumbnailExtractor->stop();
+	}
+	if (!thumbnailExtractor->load(videoPath)) return false;
+	thumbnailExtractor->setLoopState(OF_LOOP_NONE);
+	thumbnailExtractor->play();
+
+	for (int i = 0; i < 8; ++i) thumbnailExtractor->update();
+
+	float srcW = std::max(1.0f, thumbnailExtractor->getWidth());
+	float srcH = std::max(1.0f, thumbnailExtractor->getHeight());
+	int maxDim = 256;
+	int outW = maxDim;
+	int outH = maxDim;
+	if (srcW >= srcH) {
+		outW = maxDim;
+		outH = std::max(1, (int)std::round((srcH / srcW) * (float)maxDim));
+	} else {
+		outH = maxDim;
+		outW = std::max(1, (int)std::round((srcW / srcH) * (float)maxDim));
+	}
+
+	ofFbo sampleFbo;
+	sampleFbo.allocate(outW, outH, GL_RGBA);
+
+	static constexpr int kTemporalSamples = 12;
+	std::vector<uint64_t> accum;
+	int accumW = outW, accumH = outH, accumChannels = 3;
+	int samplesUsed = 0;
+	accum.assign((size_t)accumW * (size_t)accumH * (size_t)accumChannels, 0);
+	ofPixels bestPx;
+	double bestLuma = -1.0;
+
+	for (int si = 0; si < kTemporalSamples; ++si) {
+		float t = (kTemporalSamples == 1) ? 0.5f
+			: (0.20f + 0.60f * ((float)si / (float)(kTemporalSamples - 1)));
+		thumbnailExtractor->setPosition(std::clamp(t, 0.0f, 1.0f));
+
+		for (int i = 0; i < 24; ++i) thumbnailExtractor->update();
+
+		ofPixels px;
+		sampleFbo.begin();
+		ofClear(0, 0, 0, 255);
+		ofSetColor(255, 255, 255, 255);
+		thumbnailExtractor->draw(0, 0, outW, outH);
+		sampleFbo.end();
+		sampleFbo.readToPixels(px);
+		if (!px.isAllocated()) continue;
+		if (px.getWidth() != accumW || px.getHeight() != accumH || px.getNumChannels() < 3) {
+			continue;
+		}
+
+		double sumLuma = 0.0;
+		size_t pixCount = (size_t)accumW * (size_t)accumH;
+		size_t stride = (size_t)px.getNumChannels();
+		for (size_t pi = 0; pi < pixCount; pi += 16) {
+			size_t src = pi * stride;
+			sumLuma += (0.2126 * (double)px[src + 0]) + (0.7152 * (double)px[src + 1]) + (0.0722 * (double)px[src + 2]);
+		}
+		double sampleCount = std::max<size_t>(1, pixCount / 16);
+		double meanLuma = sumLuma / sampleCount;
+		if (meanLuma > bestLuma) {
+			bestLuma = meanLuma;
+			bestPx = px;
+		}
+		if (meanLuma < 1.0) continue;
+
+		pixCount = (size_t)accumW * (size_t)accumH;
+		for (size_t pi = 0; pi < pixCount; ++pi) {
+			size_t src = pi * (size_t)px.getNumChannels();
+			size_t dst = pi * 3;
+			accum[dst + 0] += px[src + 0];
+			accum[dst + 1] += px[src + 1];
+			accum[dst + 2] += px[src + 2];
+		}
+		samplesUsed++;
+	}
+
+	thumbnailExtractor->stop();
+	if (samplesUsed <= 0 && bestPx.isAllocated() && bestPx.getNumChannels() >= 3) {
+		accum.assign((size_t)accumW * (size_t)accumH * 3, 0);
+		size_t pixCount = (size_t)accumW * (size_t)accumH;
+		for (size_t pi = 0; pi < pixCount; ++pi) {
+			size_t src = pi * (size_t)bestPx.getNumChannels();
+			size_t dst = pi * 3;
+			accum[dst + 0] = bestPx[src + 0];
+			accum[dst + 1] = bestPx[src + 1];
+			accum[dst + 2] = bestPx[src + 2];
+		}
+		samplesUsed = 1;
+	}
+	if (samplesUsed <= 0 || accum.empty()) {
+		// Hard fallback: one midpoint rendered capture with extended decode warmup.
+		if (thumbnailExtractor->isLoaded()) thumbnailExtractor->stop();
+		if (!thumbnailExtractor->load(videoPath)) return false;
+		thumbnailExtractor->setLoopState(OF_LOOP_NONE);
+		thumbnailExtractor->play();
+		thumbnailExtractor->setPosition(0.5f);
+		for (int i = 0; i < 64; ++i) thumbnailExtractor->update();
+		ofPixels px;
+		sampleFbo.begin();
+		ofClear(0, 0, 0, 255);
+		ofSetColor(255, 255, 255, 255);
+		thumbnailExtractor->draw(0, 0, outW, outH);
+		sampleFbo.end();
+		sampleFbo.readToPixels(px);
+		if (!px.isAllocated() || px.getNumChannels() < 3) {
+			px = thumbnailExtractor->getPixels();
+		}
+		thumbnailExtractor->stop();
+		if (!px.isAllocated() || px.getNumChannels() < 3) return false;
+
+		accum.assign((size_t)accumW * (size_t)accumH * 3, 0);
+		size_t pixCount = (size_t)accumW * (size_t)accumH;
+		for (size_t pi = 0; pi < pixCount; ++pi) {
+			size_t src = pi * (size_t)px.getNumChannels();
+			size_t dst = pi * 3;
+			accum[dst + 0] = px[src + 0];
+			accum[dst + 1] = px[src + 1];
+			accum[dst + 2] = px[src + 2];
+		}
+		samplesUsed = 1;
+	}
+
+	ofPixels avgPx;
+	avgPx.allocate(accumW, accumH, OF_IMAGE_COLOR);
+	size_t avgN = accum.size();
+	for (size_t bi = 0; bi < avgN; ++bi) {
+		avgPx[bi] = (unsigned char)std::clamp<uint64_t>(accum[bi] / (uint64_t)samplesUsed, 0, 255);
+	}
+
+	// Do not save obviously black fallback thumbnails.
+	double sumLuma = 0.0;
+	size_t nPix = (size_t)accumW * (size_t)accumH;
+	for (size_t i = 0; i < nPix; i += 16) {
+		size_t o = i * 3;
+		sumLuma += 0.2126 * avgPx[o + 0] + 0.7152 * avgPx[o + 1] + 0.0722 * avgPx[o + 2];
+	}
+	double cnt = std::max<size_t>(1, nPix / 16);
+	if ((sumLuma / cnt) <= 2.0) {
+		return false;
+	}
+
+	ofImage img;
+	img.setFromPixels(avgPx);
+
+	return img.save(imagePath);
+}
+
+std::string ofApp::resolveThumbnailPathForPoint(const DataPoint & p) {
+	if (p.filename.empty()) return "";
+
+	auto memoIt = thumbnailPathByFilename.find(p.filename);
+	if (memoIt != thumbnailPathByFilename.end()) {
+		return memoIt->second;
+	}
+
+	std::vector<std::string> stillCandidates;
+	auto pushStillCandidate = [&](const std::string & relOrAbs) {
+		std::vector<std::string> expanded;
+		if (relOrAbs.empty()) return;
+		if (ofFilePath::isAbsolute(relOrAbs)) {
+			expanded.push_back(relOrAbs);
+		} else {
+			if (!mediaRoot.empty()) expanded.push_back(mediaRoot + relOrAbs);
+			expanded.push_back(relOrAbs);
+		}
+		stillCandidates.insert(stillCandidates.end(), expanded.begin(), expanded.end());
+	};
+
+	std::string baseName = ofFilePath::removeExt(p.filename);
+	std::string ext = ofToLower(ofFilePath::getFileExt(p.filename));
+
+	// Preferred pipeline: persistent midpoint frame cache in segments/image_segments.
+	if (!baseName.empty() && !mediaRoot.empty()) {
+		std::string imageSegPath = mediaRoot + "image_segments/" + baseName + ".png";
+		if (ofFile(imageSegPath).exists() || ensureImageSegmentForBaseName(baseName)) {
+			thumbnailPathByFilename[p.filename] = imageSegPath;
+			return imageSegPath;
+		}
+	}
+
+	pushStillCandidate(p.filename);
+
+	std::vector<std::string> stillExts = {"png", "jpg", "jpeg", "webp", "bmp"};
+	for (const auto & e : stillExts) {
+		pushStillCandidate(baseName + "." + e);
+		pushStillCandidate("stills/" + baseName + "." + e);
+		pushStillCandidate("thumbs/" + baseName + "." + e);
+		pushStillCandidate("thumbnails/" + baseName + "." + e);
+		pushStillCandidate("video_segments/" + baseName + "." + e);
+	}
+
+	if (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "webp" || ext == "bmp") {
+		pushStillCandidate(baseName + "." + ext);
+	}
+
+	std::unordered_set<std::string> seen;
+	for (const auto & c : stillCandidates) {
+		if (c.empty() || seen.find(c) != seen.end()) continue;
+		seen.insert(c);
+		if (ofFile(c).exists()) {
+			thumbnailPathByFilename[p.filename] = c;
+			return c;
+		}
+	}
+
+	thumbnailPathByFilename[p.filename] = "";
+	return "";
+}
+
+std::shared_ptr<ofImage> ofApp::getThumbnailCached(const std::string & path, int & loadsRemaining) {
+	if (path.empty()) return nullptr;
+
+	uint64_t nowMs = ofGetElapsedTimeMillis();
+	auto it = thumbnailCache.find(path);
+	if (it != thumbnailCache.end()) {
+		thumbnailCacheLastUsed[path] = nowMs;
+		return it->second;
+	}
+
+	if (loadsRemaining <= 0) return nullptr;
+
+	auto img = std::make_shared<ofImage>();
+	std::string ext = ofToLower(ofFilePath::getFileExt(path));
+	bool isVideoPath = (ext == "mp4" || ext == "mov" || ext == "m4v" || ext == "avi" || ext == "webm");
+	if (isVideoPath) {
+		std::string baseName = ofFilePath::removeExt(ofFilePath::getFileName(path));
+		if (baseName.empty()) return nullptr;
+		if (!ensureImageSegmentForBaseName(baseName)) return nullptr;
+		std::string imagePath = mediaRoot + "image_segments/" + baseName + ".png";
+		if (!img->load(imagePath)) return nullptr;
+	} else {
+		if (!img->load(path)) {
+			return nullptr;
+		}
+	}
+
+	loadsRemaining--;
+	thumbnailCache[path] = img;
+	thumbnailCacheLastUsed[path] = nowMs;
+	pruneThumbnailCache();
+	return img;
+}
+
+void ofApp::pruneThumbnailCache() {
+	while (thumbnailCache.size() > thumbnailCacheBudget) {
+		uint64_t oldestTs = std::numeric_limits<uint64_t>::max();
+		std::string oldestKey;
+		for (const auto & kv : thumbnailCacheLastUsed) {
+			if (kv.second < oldestTs) {
+				oldestTs = kv.second;
+				oldestKey = kv.first;
+			}
+		}
+		if (oldestKey.empty()) break;
+		thumbnailCache.erase(oldestKey);
+		thumbnailCacheLastUsed.erase(oldestKey);
+	}
+}
+
 //--------------------------------------------------------------
 void ofApp::setup() {
 	ofSetBackgroundColor(20, 25, 40);
@@ -64,6 +564,11 @@ void ofApp::setup() {
 	// Initialize state
 	points.clear();
 	paths.clear();
+	thumbnailCache.clear();
+	thumbnailCacheLastUsed.clear();
+	thumbnailPathByFilename.clear();
+	thumbnailExtractor = std::make_shared<ofVideoPlayer>();
+	thumbnailExtractor->setUseTexture(true);
 
 	// Initialize default path 0 for settings
 	auto p0 = std::make_shared<PathObject>(0);
@@ -131,6 +636,7 @@ void ofApp::setup() {
 	params.add(playheadColor.set("Playhead Color", ofColor(255), ofColor(0, 0), ofColor(255, 255)));
 	params.add(videoFitMode.set("Video Fit 0=stretch 1=height 2=width", 0, 0, 2));
 	params.add(videoDisplayMode.set("Video Mode 0=single 1=grid 2=blendmix 3=mapped 4=collage", 0, 0, 4));
+	params.add(pointGlyphMode_param.set("Point Glyph 0=O 1=[] 2=X 3=# 4=cluster 5=emoji 6=thumb 7=mix", 0, 0, 7));
 	params.add(videoFadeSpeed_param.set("Video Fade Speed", 15.0f, 1.0f, 60.0f));
 	params.add(cloudTransitionSpeed.set("Cloud Transition Speed", 0.05f, 0.01f, 1.0f));
 	params.add(neighbourSeqGapMs_param.set("Neighbour Seq Gap (ms)", 300.0f, 50.0f, 2000.0f));
@@ -170,6 +676,12 @@ void ofApp::setup() {
 	//bool annotationFontLoaded = annotationFont.load("lmroman10-italic.otf", annotationFontSize);
 	bool annotationFontLoaded = annotationFont.load("lmroman10-regular.otf", annotationFontSize);
 	if (!annotationFontLoaded) annotationFontLoaded = annotationFont.load(OF_TTF_SANS, annotationFontSize);
+	if (annotationFontLoaded) {
+		ofRectangle emojiBox = annotationFont.getStringBoundingBox("😀", 0.0f, 0.0f);
+		ofRectangle fallbackBox = annotationFont.getStringBoundingBox("?", 0.0f, 0.0f);
+		emojiGlyphLikelySupported = (emojiBox.width > 0.0f && emojiBox.height > 0.0f
+			&& std::abs(emojiBox.width - fallbackBox.width) > 0.5f);
+	}
 
 	bool activeFontLoaded = activeFont.load("lmroman10-regular.otf", activeFontSize);
 	if (!activeFontLoaded) activeFontLoaded = activeFont.load(OF_TTF_SANS, activeFontSize);
@@ -1290,6 +1802,23 @@ void ofApp::drawVisuals() {
 	float sizeT = std::clamp((pointSize.get() - 1.0f) / 99.0f, 0.0f, 1.0f);
 	float diagFactor = (1.0f / 1000.0f) * std::pow(1000.0f, sizeT); // log interpolation
 	float basePointRadiusWorld = pointsDiag * diagFactor;
+	pointGlyphMode = (PointGlyphMode)std::clamp((int)pointGlyphMode_param.get(), 0, 7);
+	int thumbnailLoadsRemaining = thumbnailLoadsPerFrame;
+	float screenCenterX = ofGetWidth() * 0.5f;
+	float screenCenterY = ofGetHeight() * 0.5f;
+
+	// Cluster labels for glyph mode 4:
+	// unclustered => 1, then clustered groups => 2,3,4... by ascending cluster_id.
+	std::unordered_set<int> seenClusterIds;
+	for (const auto & p : points) {
+		if (p.cluster_id >= 0) seenClusterIds.insert(p.cluster_id);
+	}
+	std::vector<int> sortedGlyphClusterIds(seenClusterIds.begin(), seenClusterIds.end());
+	std::sort(sortedGlyphClusterIds.begin(), sortedGlyphClusterIds.end());
+	std::unordered_map<int, int> clusterGlyphLabel;
+	for (int ci = 0; ci < (int)sortedGlyphClusterIds.size(); ++ci) {
+		clusterGlyphLabel[sortedGlyphClusterIds[ci]] = ci + 2;
+	}
 
 	// Draw Points
 	ofFill(); // Ensure fill is enabled
@@ -1348,7 +1877,119 @@ void ofApp::drawVisuals() {
 			}
 			scale = ofLerp(0.2f, 2.0f, val);
 		}
-		ofDrawCircle(p.x, p.y, basePointRadiusWorld * scale * sizeMultiplier);
+		float glyphRadiusWorld = basePointRadiusWorld * scale * sizeMultiplier;
+		PointGlyphMode drawMode = pointGlyphMode;
+		if (drawMode == PointGlyphMode::MIXED) {
+			uint32_t mixHash = stableStringHash(p.filename + "|" + p.text + "|" + ofToString(i));
+			drawMode = (PointGlyphMode)(mixHash % 6); // avoid thumbnail churn in mixed mode
+		}
+
+		switch (drawMode) {
+		case PointGlyphMode::CIRCLE:
+			ofDrawCircle(p.x, p.y, glyphRadiusWorld);
+			break;
+
+		case PointGlyphMode::SQUARE:
+			ofDrawRectangle(p.x - glyphRadiusWorld, p.y - glyphRadiusWorld,
+				glyphRadiusWorld * 2.0f, glyphRadiusWorld * 2.0f);
+			break;
+
+		case PointGlyphMode::X_MARK:
+			ofSetLineWidth(1.5f);
+			ofDrawLine(p.x - glyphRadiusWorld, p.y - glyphRadiusWorld,
+				p.x + glyphRadiusWorld, p.y + glyphRadiusWorld);
+			ofDrawLine(p.x - glyphRadiusWorld, p.y + glyphRadiusWorld,
+				p.x + glyphRadiusWorld, p.y - glyphRadiusWorld);
+			ofSetLineWidth(1.0f);
+			break;
+
+		case PointGlyphMode::NUMBER: {
+			uint32_t h = stableStringHash(p.filename + "|" + ofToString(i));
+			std::string label(1, (char)('0' + (h % 10)));
+			if (annotationFont.isLoaded()) {
+				ofRectangle b = annotationFont.getStringBoundingBox(label, 0.0f, 0.0f);
+				float targetH = std::max(glyphRadiusWorld * 2.1f, 1e-6f);
+				float scaleY = targetH / std::max(b.height, 1.0f);
+				ofPushMatrix();
+				ofTranslate(p.x, p.y);
+				ofScale(scaleY, scaleY);
+				annotationFont.drawString(label, -b.width * 0.5f, b.height * 0.5f);
+				ofPopMatrix();
+			} else {
+				ofDrawCircle(p.x, p.y, glyphRadiusWorld);
+			}
+		} break;
+
+		case PointGlyphMode::CLUSTER_NUMBER: {
+			int clusterNumber = 1;
+			auto it = clusterGlyphLabel.find(p.cluster_id);
+			if (it != clusterGlyphLabel.end()) clusterNumber = it->second;
+			std::string label = ofToString(clusterNumber);
+			if (annotationFont.isLoaded()) {
+				ofRectangle b = annotationFont.getStringBoundingBox(label, 0.0f, 0.0f);
+				float targetH = std::max(glyphRadiusWorld * 2.1f, 1e-6f);
+				float scaleY = targetH / std::max(b.height, 1.0f);
+				ofPushMatrix();
+				ofTranslate(p.x, p.y);
+				ofScale(scaleY, scaleY);
+				annotationFont.drawString(label, -b.width * 0.5f, b.height * 0.5f);
+				ofPopMatrix();
+			} else {
+				ofDrawCircle(p.x, p.y, glyphRadiusWorld);
+			}
+		} break;
+
+		case PointGlyphMode::EMOJI: {
+			uint32_t h = stableStringHash(p.filename + "|" + p.text + "|emoji");
+			int emojiIdx = (int)(h % kEmojiGlyphs.size());
+			const std::string & label = emojiGlyphLikelySupported
+				? kEmojiGlyphs[emojiIdx]
+				: kEmojiFallbackGlyphs[emojiIdx];
+			if (annotationFont.isLoaded()) {
+				ofRectangle b = annotationFont.getStringBoundingBox(label, 0.0f, 0.0f);
+				float targetH = std::max(glyphRadiusWorld * 2.1f, 1e-6f);
+				float scaleY = targetH / std::max(b.height, 1.0f);
+				ofPushMatrix();
+				ofTranslate(p.x, p.y);
+				ofScale(scaleY, scaleY);
+				annotationFont.drawString(label, -b.width * 0.5f, b.height * 0.5f);
+				ofPopMatrix();
+			} else {
+				ofDrawCircle(p.x, p.y, glyphRadiusWorld);
+			}
+		} break;
+
+		case PointGlyphMode::THUMBNAIL: {
+			float sx = p.x * zoom + pan.x + screenCenterX;
+			float sy = p.y * zoom + pan.y + screenCenterY;
+			float screenPad = std::max(32.0f, glyphRadiusWorld * zoom * 4.0f);
+			if (sx < -screenPad || sx > ofGetWidth() + screenPad || sy < -screenPad || sy > ofGetHeight() + screenPad) {
+				break;
+			}
+
+			std::string thumbPath = resolveThumbnailPathForPoint(p);
+			auto thumb = getThumbnailCached(thumbPath, thumbnailLoadsRemaining);
+			if (thumb && thumb->isAllocated() && thumb->getWidth() > 0 && thumb->getHeight() > 0) {
+				float targetH = glyphRadiusWorld * 2.4f;
+				float targetW = targetH * ((float)thumb->getWidth() / (float)thumb->getHeight());
+				targetW = std::clamp(targetW, glyphRadiusWorld * 1.4f, glyphRadiusWorld * 3.6f);
+				ofSetColor(255, 255, 255, (int)(alpha * dataAlphaScale));
+				thumb->draw(p.x - targetW * 0.5f, p.y - targetH * 0.5f, targetW, targetH);
+			} else {
+				ofNoFill();
+				ofSetLineWidth(1.0f);
+				ofDrawRectangle(p.x - glyphRadiusWorld, p.y - glyphRadiusWorld,
+					glyphRadiusWorld * 2.0f, glyphRadiusWorld * 2.0f);
+				ofDrawLine(p.x - glyphRadiusWorld, p.y - glyphRadiusWorld,
+					p.x + glyphRadiusWorld, p.y + glyphRadiusWorld);
+				ofFill();
+			}
+		} break;
+
+		case PointGlyphMode::MIXED:
+			// handled above
+			break;
+		}
 	}
 
 	// --- Neighbour Mode Highlighting ---
@@ -1661,15 +2302,16 @@ void ofApp::drawVisuals() {
 	ofDrawBitmapString("3D Dim: " + dimStr, 20, 80);
 	ofDrawBitmapString("Audio Mode: " + string(defaultPathMode == PathObject::LOOP_MODE ? "LOOP" : "ONCE"), 20, 100);
 	ofDrawBitmapString("Annotation Mode (Tab): " + string(annotationManager.isEnabled() ? "ON" : "OFF"), 20, 120);
+	ofDrawBitmapString("Point Glyph (5 cycle): " + pointGlyphModeName(pointGlyphMode), 20, 140);
 	{
 		string nbStr = neighbourModeActive ? "ON" : "OFF";
 		if (neighbourModeActive && selectedPointIdx >= 0 && selectedPointIdx < (int)points.size()) {
 			nbStr += " | " + ofFilePath::getFileName(points[selectedPointIdx].filename);
 		}
-		ofDrawBitmapString("Neighbour Mode (N): " + nbStr, 20, 140);
+		ofDrawBitmapString("Neighbour Mode (N): " + nbStr, 20, 160);
 	}
 
-	int textY = 160;
+	int textY = 180;
 	if (selectedPath) {
 		ofDrawBitmapString("Selected: " + selectedPath->name + " - Video: " + (selectedPath->sendToVideo ? "ON" : "OFF"), 20, textY);
 		textY += 20;
@@ -1976,6 +2618,13 @@ void ofApp::keyPressed(int key) {
 
 	// Annotation system gets first crack — when typing, it consumes all keys
 	if (annotationManager.onKeyPressed(key, points)) return;
+
+	if (key == '5' || key == '%') {
+		pointGlyphMode = nextPointGlyphMode(pointGlyphMode);
+		pointGlyphMode_param = (int)pointGlyphMode;
+		ofLogNotice("ofApp") << "Point Glyph Mode: " << pointGlyphModeName(pointGlyphMode);
+		return;
+	}
 
 	// Pull all labels inside point bounds
 	if (key == '0') {
@@ -2666,6 +3315,10 @@ void ofApp::mousePressed(int x, int y, int button) {
 		} else {
 			lastMouse.set(x, y);
 			isDragging = true;
+			// Manual pan should take control immediately and cancel any lingering view animation.
+			isViewAnimating = false;
+			targetPan = pan;
+			targetZoom = zoom;
 
 			// Selection Logic
 			// Simple closest path selection
@@ -2861,8 +3514,11 @@ void ofApp::mouseDragged(int x, int y, int button) {
 		if (isMarqueeZooming) {
 			marqueeEnd.set(x, y);
 		} else if (isDragging) {
+			isViewAnimating = false;
 			ofVec2f diff = ofVec2f(x, y) - lastMouse;
 			pan += diff;
+			targetPan = pan;
+			targetZoom = zoom;
 			lastMouse.set(x, y);
 		}
 	}
@@ -3188,6 +3844,9 @@ bool ofApp::loadPoints(string jsonPath, bool loadGlobalAnnotations) {
 
 		points.clear();
 		clusters.clear();
+		thumbnailCache.clear();
+		thumbnailCacheLastUsed.clear();
+		thumbnailPathByFilename.clear();
 
 		ofLogNotice("ofApp::loadPoints") << "Loading points from " << jsonPath;
 
@@ -3374,6 +4033,35 @@ bool ofApp::loadPoints(string jsonPath, bool loadGlobalAnnotations) {
 		}
 		std::sort(sortedClusterIds.begin(), sortedClusterIds.end());
 		activeClusterId = -999; // Reset filter on new load
+
+		// One-time midpoint image cache generation for thumbnail glyph mode.
+		if (!mediaRoot.empty() && ofDirectory(mediaRoot + "video_segments/").exists()) {
+			std::unordered_set<std::string> uniqueBaseNames;
+			for (const auto & p : points) {
+				std::string baseName = ofFilePath::removeExt(p.filename);
+				if (!baseName.empty()) uniqueBaseNames.insert(baseName);
+			}
+
+			thumbnailCacheBudget = std::clamp((size_t)(uniqueBaseNames.size() + 64), (size_t)256, (size_t)4096);
+			thumbnailLoadsPerFrame = std::clamp((int)(uniqueBaseNames.size() / 24) + 8, 8, 64);
+
+			int generatedCount = 0;
+			int alreadyExistingCount = 0;
+			for (const auto & baseName : uniqueBaseNames) {
+				std::string imageSegPath = mediaRoot + "image_segments/" + baseName + ".png";
+				if (ofFile(imageSegPath).exists()) {
+					alreadyExistingCount++;
+					continue;
+				}
+				if (ensureImageSegmentForBaseName(baseName)) generatedCount++;
+			}
+			ofLogNotice("ofApp::loadPoints")
+				<< "Image segments ready. Existing: " << alreadyExistingCount
+				<< ", Generated: " << generatedCount
+				<< ", Total unique points media: " << uniqueBaseNames.size()
+				<< ", CacheBudget: " << thumbnailCacheBudget
+				<< ", LoadsPerFrame: " << thumbnailLoadsPerFrame;
+		}
 
 		// Legacy global annotations are optional and intentionally disabled when
 		// loading compositions so annotation state comes only from the composition file.

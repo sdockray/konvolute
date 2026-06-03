@@ -1017,7 +1017,7 @@ void ofApp::update() {
 	// Run background media generation in small steps so UI stays responsive.
 	processMediaAssetGenerationStep();
 
-	// Camera pointer experiment: detect bright moving region and map to screen cursor.
+	// Camera pointer experiment: detect largest bright blob and map its centroid to cursor.
 	if (cameraInputEnabled && cameraGrabber.isInitialized()) {
 		cameraGrabber.update();
 		if (cameraGrabber.isFrameNew()) {
@@ -1026,24 +1026,80 @@ void ofApp::update() {
 			int h = px.getHeight();
 			int ch = px.getNumChannels();
 			if (w > 0 && h > 0 && ch >= 3) {
-				double sumX = 0.0;
-				double sumY = 0.0;
-				int count = 0;
-				for (int y = 0; y < h; y += 3) {
-					for (int x = 0; x < w; x += 3) {
+				const int step = 3;
+				int gw = (w + step - 1) / step;
+				int gh = (h + step - 1) / step;
+				std::vector<unsigned char> bright((size_t)gw * (size_t)gh, 0);
+
+				for (int gy = 0; gy < gh; ++gy) {
+					for (int gx = 0; gx < gw; ++gx) {
+						int x = gx * step;
+						int y = gy * step;
+						if (x >= w || y >= h) continue;
 						size_t i = ((size_t)y * (size_t)w + (size_t)x) * (size_t)ch;
 						float luma = 0.2126f * px[i + 0] + 0.7152f * px[i + 1] + 0.0722f * px[i + 2];
 						if (luma >= (float)cameraThreshold) {
-							sumX += (double)x;
-							sumY += (double)y;
-							count++;
+							bright[(size_t)gy * (size_t)gw + (size_t)gx] = 1;
 						}
 					}
 				}
 
-				if (count >= cameraMinPixels) {
-					ofVec2f detected((float)(sumX / (double)count) / std::max(1, w - 1),
-						(float)(sumY / (double)count) / std::max(1, h - 1));
+				std::vector<unsigned char> visited((size_t)gw * (size_t)gh, 0);
+				int bestArea = 0;
+				double bestSumGX = 0.0;
+				double bestSumGY = 0.0;
+				std::vector<int> stack;
+				stack.reserve((size_t)gw * (size_t)gh / 4);
+
+				for (int gy = 0; gy < gh; ++gy) {
+					for (int gx = 0; gx < gw; ++gx) {
+						size_t startIdx = (size_t)gy * (size_t)gw + (size_t)gx;
+						if (!bright[startIdx] || visited[startIdx]) continue;
+
+						int area = 0;
+						double sumGX = 0.0;
+						double sumGY = 0.0;
+						stack.clear();
+						stack.push_back((int)startIdx);
+						visited[startIdx] = 1;
+
+						while (!stack.empty()) {
+							int idx = stack.back();
+							stack.pop_back();
+							int cx = idx % gw;
+							int cy = idx / gw;
+
+							area++;
+							sumGX += (double)cx;
+							sumGY += (double)cy;
+
+							const int nx[4] = {cx - 1, cx + 1, cx, cx};
+							const int ny[4] = {cy, cy, cy - 1, cy + 1};
+							for (int k = 0; k < 4; ++k) {
+								if (nx[k] < 0 || nx[k] >= gw || ny[k] < 0 || ny[k] >= gh) continue;
+								size_t nIdx = (size_t)ny[k] * (size_t)gw + (size_t)nx[k];
+								if (!bright[nIdx] || visited[nIdx]) continue;
+								visited[nIdx] = 1;
+								stack.push_back((int)nIdx);
+							}
+						}
+
+						if (area > bestArea) {
+							bestArea = area;
+							bestSumGX = sumGX;
+							bestSumGY = sumGY;
+						}
+					}
+				}
+
+				if (bestArea >= cameraMinPixels) {
+					double meanGX = bestSumGX / (double)bestArea;
+					double meanGY = bestSumGY / (double)bestArea;
+					float pxX = (float)((meanGX + 0.5) * (double)step);
+					float pxY = (float)((meanGY + 0.5) * (double)step);
+
+					ofVec2f detected(pxX / std::max(1, w - 1),
+						pxY / std::max(1, h - 1));
 					if (cameraMirrorX) detected.x = 1.0f - detected.x;
 					detected.x = std::clamp(detected.x, 0.0f, 1.0f);
 					detected.y = std::clamp(detected.y, 0.0f, 1.0f);
@@ -1054,10 +1110,14 @@ void ofApp::update() {
 						cameraCursorNorm = cameraCursorNorm.getInterpolated(
 							detected, std::clamp(cameraSmoothing, 0.01f, 1.0f));
 					}
+					cameraLostFrames = 0;
 					cameraCursorDetected = true;
 					cameraCursorScreen.set(cameraCursorNorm.x * ofGetWidth(), cameraCursorNorm.y * ofGetHeight());
 				} else {
-					cameraCursorDetected = false;
+					cameraLostFrames++;
+					if (cameraLostFrames > cameraMaxLostFrames) {
+						cameraCursorDetected = false;
+					}
 				}
 			}
 		}
@@ -1465,7 +1525,7 @@ void ofApp::update() {
 	if (cameraInputEnabled && currentMode == DRAW_FREEHAND) {
 		auto finalizeCameraPath = [&]() {
 			if (!isDrawingPath || !currentPath) return;
-			if (currentPath->polyline.getPerimeter() < 10.0f / zoom || currentPath->polyline.size() < 3) {
+			if (currentPath->polyline.size() < 2) {
 				isDrawingPath = false;
 				currentPath = nullptr;
 				return;
@@ -1482,7 +1542,7 @@ void ofApp::update() {
 			currentPath = nullptr;
 		};
 
-		if (cameraCursorDetected && cameraPenDown) {
+		if (cameraPenDown && cameraCursorDetected) {
 			ofVec2f worldPos = screenToWorld(cameraCursorScreen.x, cameraCursorScreen.y);
 			if (!isDrawingPath) {
 				currentPath = std::make_shared<PathObject>(pathIdCounter++);
@@ -1490,12 +1550,9 @@ void ofApp::update() {
 				isDrawingPath = true;
 				currentPath->addPoint(worldPos);
 			} else {
-				const auto & verts = currentPath->polyline.getVertices();
-				if (verts.empty() || ofVec2f(verts.back().x, verts.back().y).distance(worldPos) > (2.0f / std::max(zoom, 1e-3f))) {
-					currentPath->addPoint(worldPos);
-				}
+				currentPath->addPoint(worldPos);
 			}
-		} else {
+		} else if (!cameraPenDown) {
 			finalizeCameraPath();
 		}
 	}
@@ -2951,8 +3008,18 @@ void ofApp::drawVisuals() {
 				+ string(" | Pen ") + (cameraPenDown ? "DOWN" : "UP"))
 			: "OFF"),
 		20, 280);
+	int camPts = (isDrawingPath && currentPath) ? (int)currentPath->polyline.size() : 0;
+	string camHint = "Ready";
+	if (currentMode != DRAW_FREEHAND && !isDrawingPath) camHint = "Switch to f (Draw)";
+	else if (!cameraPenDown) camHint = "Pen is UP";
+	else if (!cameraCursorDetected) camHint = "No blob tracked";
+	ofDrawBitmapString("Camera Draw State: "
+		+ string(isDrawingPath ? "DRAWING" : "IDLE")
+		+ " | Points=" + ofToString(camPts)
+		+ " | " + camHint,
+		20, 300);
 
-	int textY = 300;
+	int textY = 320;
 	if (selectedPath) {
 		ofDrawBitmapString("Selected: " + selectedPath->name + " - Video: " + (selectedPath->sendToVideo ? "ON" : "OFF"), 20, textY);
 		textY += 20;
@@ -3289,12 +3356,9 @@ void ofApp::keyPressed(int key) {
 		return;
 	}
 
-	// Annotation system gets first crack — when typing, it consumes all keys
-	if (annotationManager.onKeyPressed(key, points)) return;
-
 	auto finalizeCurrentFreehandPath = [&]() {
-		if (!(currentMode == DRAW_FREEHAND && isDrawingPath && currentPath)) return;
-		if (currentPath->polyline.getPerimeter() < 10.0f / zoom || currentPath->polyline.size() < 3) {
+		if (!(isDrawingPath && currentPath)) return;
+		if (currentPath->polyline.size() < 2) {
 			isDrawingPath = false;
 			currentPath = nullptr;
 			return;
@@ -3319,6 +3383,7 @@ void ofApp::keyPressed(int key) {
 			}
 			cameraInputEnabled = cameraGrabber.isInitialized();
 			cameraCursorDetected = false;
+			cameraLostFrames = 0;
 			cameraPenDown = false;
 			if (cameraInputEnabled) {
 				setMediaGenerationStatus("Camera control ON. Press '/' for pen down/up.", 2200);
@@ -3328,6 +3393,7 @@ void ofApp::keyPressed(int key) {
 		} else {
 			cameraInputEnabled = false;
 			cameraCursorDetected = false;
+			cameraLostFrames = 0;
 			cameraPenDown = false;
 			finalizeCurrentFreehandPath();
 
@@ -3336,14 +3402,25 @@ void ofApp::keyPressed(int key) {
 		return;
 	}
 
+	// Annotation system gets first crack after global controls.
+	if (annotationManager.onKeyPressed(key, points)) return;
+
 	if (key == '/' || key == '?') {
 		if (cameraInputEnabled) {
 			cameraPenDown = !cameraPenDown;
+			if (cameraPenDown && currentMode == DRAW_FREEHAND && cameraCursorDetected && !isDrawingPath) {
+				currentPath = std::make_shared<PathObject>(pathIdCounter++);
+				currentPath->mode = defaultPathMode;
+				isDrawingPath = true;
+				ofVec2f worldPos = screenToWorld(cameraCursorScreen.x, cameraCursorScreen.y);
+				currentPath->addPoint(worldPos);
+			}
 			if (!cameraPenDown) {
 				finalizeCurrentFreehandPath();
 			}
 			setMediaGenerationStatus(
-				std::string("Camera pen ") + (cameraPenDown ? "DOWN" : "UP"),
+				std::string("Camera pen ") + (cameraPenDown ? "DOWN" : "UP")
+				+ (currentMode == DRAW_FREEHAND ? " | draw mode" : " | not in draw mode"),
 				1200);
 		}
 		return;

@@ -104,6 +104,8 @@ public:
 	int cameraThreshold = 190;
 	int cameraMinPixels = 140;
 	float cameraSmoothing = 0.22f;
+	int cameraLostFrames = 0;
+	int cameraMaxLostFrames = 8;
 	ofVideoGrabber cameraGrabber;
 	ofVec2f cameraCursorNorm = ofVec2f(0.5f, 0.5f);
 	ofVec2f cameraCursorScreen = ofVec2f(0.0f, 0.0f);

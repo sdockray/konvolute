@@ -40,6 +40,14 @@ enum class PointGlyphMode {
 	MIXED
 };
 
+enum class SpectrogramBlendMode {
+	NORMAL = 0,
+	ADD,
+	MULTIPLY,
+	SCREEN,
+	LUMA_KEY
+};
+
 class ofApp : public ofBaseApp {
 
 public:
@@ -125,12 +133,39 @@ public:
 	float dataVisualAlpha = 1.0f;
 	float targetDataVisualAlpha = 1.0f;
 	bool emojiGlyphLikelySupported = false;
+
+	// Audio-to-visual feedback state
+	float audioEnergy = 0.0f;
+	uint64_t lastOnsetTimeMs = 0;
+	static constexpr int ONSET_VISUAL_DURATION_MS = 50;
 	size_t thumbnailCacheBudget = 1024;
 	int thumbnailLoadsPerFrame = 24;
 	std::unordered_map<std::string, std::shared_ptr<ofImage>> thumbnailCache;
 	std::unordered_map<std::string, uint64_t> thumbnailCacheLastUsed;
 	std::unordered_map<std::string, std::string> thumbnailPathByFilename;
 	std::shared_ptr<ofVideoPlayer> thumbnailExtractor;
+	bool spectrogramLayerEnabled = false;
+	float spectrogramLayerAlpha = 0.78f;
+	float spectrogramTrailAlpha = 0.35f;
+	int spectrogramTrailLength = 4;
+	float spectrogramLumaKeyThreshold = 0.08f;
+	SpectrogramBlendMode spectrogramBlendMode = SpectrogramBlendMode::NORMAL;
+	bool spectrogramPrecomputeOnLoad = true;
+	bool allowAutoMediaGeneration = false;
+	bool mediaGenerationActive = false;
+	std::deque<std::string> pendingThumbnailBaseNames;
+	std::deque<std::string> pendingSpectrogramMediaPaths;
+	int mediaGenerationTotal = 0;
+	int mediaGenerationDone = 0;
+	int mediaGenerationThumbGenerated = 0;
+	int mediaGenerationSpecGenerated = 0;
+	std::string mediaGenerationStatusText;
+	uint64_t mediaGenerationStatusUntilMs = 0;
+	std::string currentSpectrogramImagePath;
+	std::deque<std::string> spectrogramTrailImagePaths;
+	std::unordered_map<std::string, std::shared_ptr<ofImage>> spectrogramCache;
+	std::unordered_map<std::string, std::shared_ptr<ofImage>> spectrogramDisplayCache;
+	std::unordered_map<std::string, std::string> spectrogramPathByMedia;
 
 	// Browse Mode
 	DataPoint hoveredPoint;
@@ -213,6 +248,17 @@ public:
 	std::vector<ofVec2f> collageOffsetsPx;
 	int collageWriteCounter = 0;
 
+	// Tile Mosaic Mode State (mode 5)
+	// Dense tile grid where each tile draws a source subsection of one video.
+	static constexpr int kMosaicCols = 24;
+	static constexpr int kMosaicRows = 18;
+	static constexpr int kMosaicMaxHistory = 4; // max distinct videos kept alive
+	std::vector<std::shared_ptr<ofVideoPlayer>> mosaicPool;  // pre-allocated player pool
+	std::deque<int> mosaicHistorySlots;                       // active pool indices, newest first
+	std::vector<int> mosaicTileAssignment;                    // pool slot per tile, -1 = empty
+	std::vector<ofFbo> mosaicHoldFbos;                        // last valid frame per slot
+	std::vector<bool> mosaicHoldAllocated;                    // hold FBO allocation flags
+
 	// Datamosh Mode State
 	struct MotionVector {
 		int dx, dy;
@@ -255,13 +301,23 @@ public:
 	ofParameter<float> videoFadeSpeed_param; // crossfade speed (alpha/frame)
 	ofParameter<float> cloudTransitionSpeed; // transition speed between clouds
 
-	ofParameter<int> videoDisplayMode; // 0=single, 1=grid, 2=ghost, 3=mapped, 4=collage
+	ofParameter<int> videoDisplayMode; // 0=single, 1=grid, 2=ghost, 3=mapped, 4=collage, 5=mosaic
+	ofParameter<float> mosaicReplaceRatio; // fraction of tiles replaced per video trigger (0-1)
 	ofParameter<int> pointGlyphMode_param; // 0=circle 1=square 2=x 3=number 4=cluster 5=emoji 6=thumb 7=mixed
+	ofParameter<float> spectrogramLayerAlpha_param;
+	ofParameter<float> spectrogramTrailAlpha_param;
+	ofParameter<int> spectrogramTrailLength_param;
+	ofParameter<float> spectrogramLumaKeyThreshold_param;
+	ofParameter<int> spectrogramBlendMode_param; // 0=normal 1=add 2=multiply 3=screen 4=luma
 	ofParameter<int> macroblockSize;
 	ofParameter<float> macroblockThreshold;
 	ofParameter<float> datamoshDecay;
 	ofParameter<int> datamoshSearchRadius;
 	ofParameter<float> neighbourSeqGapMs_param; // gap between neighbour triggers (ms)
+	ofParameter<bool> audioVisualFeedbackEnabled;
+	ofParameter<float> audioEnergyVisualAmount;
+	ofParameter<float> audioOnsetVisualAmount;
+	ofParameter<float> audioPathWobbleAmount;
 
 	// Fonts
 	ofTrueTypeFont font;
@@ -287,6 +343,13 @@ public:
 	bool ensureImageSegmentForBaseName(const std::string & baseName);
 	std::shared_ptr<ofImage> getThumbnailCached(const std::string & path, int & loadsRemaining);
 	void pruneThumbnailCache();
+	std::string resolveSpectrogramPathForMedia(const std::string & mediaPath);
+	std::shared_ptr<ofImage> getSpectrogramCached(const std::string & imagePath);
+	std::shared_ptr<ofImage> getSpectrogramDisplayCached(const std::string & imagePath);
+	void noteTriggeredMediaForSpectrogram(const std::string & mediaPath);
+	void beginMediaAssetGeneration();
+	void processMediaAssetGenerationStep();
+	void setMediaGenerationStatus(const std::string & status, uint64_t holdMs = 1500);
 	std::shared_ptr<PathObject> createWanderingPath(const DataPoint & start,
 		int maxPoints, float randomness, int numNeighbors);
 

@@ -7,6 +7,8 @@
 class OscManager {
 public:
 	void setup(std::string host, int scPort, int uiPort, int listenPort);
+	void setSCPort(int scPort);
+	int getSCPort() const;
 
 	// Message Retrieval
 	bool hasWaitingMessages();
@@ -67,6 +69,10 @@ private:
 	ofxOscSender uiSender; // To UI (57122)
 	ofxOscReceiver receiver; // From UI (57121)
 	bool isReady = false;
+	std::string oscHost = "127.0.0.1";
+	int currentScPort = 57120;
+	int currentUiPort = 57122;
+	int currentListenPort = 57121;
 
 	std::deque<std::string> messageHistory;
 	const int maxHistory = 20;

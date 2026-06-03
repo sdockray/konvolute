@@ -1,10 +1,25 @@
 #include "OscManager.h"
 
 void OscManager::setup(std::string host, int scPort, int uiPort, int listenPort) {
+	oscHost = host;
+	currentScPort = scPort;
+	currentUiPort = uiPort;
+	currentListenPort = listenPort;
 	sender.setup(host, scPort);
 	uiSender.setup(host, uiPort);
 	receiver.setup(listenPort);
 	isReady = true;
+}
+
+void OscManager::setSCPort(int scPort) {
+	if (scPort <= 0 || scPort == currentScPort) return;
+	currentScPort = scPort;
+	sender.setup(oscHost, currentScPort);
+	ofLogNotice("OscManager") << "Retargeted SC sender to " << oscHost << ":" << currentScPort;
+}
+
+int OscManager::getSCPort() const {
+	return currentScPort;
 }
 
 bool OscManager::hasWaitingMessages() { return receiver.hasWaitingMessages(); }
@@ -39,7 +54,8 @@ void OscManager::addToHistory(const ofxOscMessage & m) {
 }
 
 void OscManager::drawDebug(float x, float y) {
-	ofDrawBitmapString("OSC DEBUG (57121 In, 57120 Out, 57122 UI)", x, y);
+	ofDrawBitmapString("OSC DEBUG (" + ofToString(currentListenPort) + " In, " +
+		ofToString(currentScPort) + " Out, " + ofToString(currentUiPort) + " UI)", x, y);
 	y += 20;
 	for (auto & s : messageHistory) {
 		ofDrawBitmapString(s, x, y);

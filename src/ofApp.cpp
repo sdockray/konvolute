@@ -37,6 +37,34 @@ static PointGlyphMode nextPointGlyphMode(PointGlyphMode mode) {
 	return (PointGlyphMode)v;
 }
 
+static std::string spectrogramBlendModeName(SpectrogramBlendMode mode) {
+	switch (mode) {
+	case SpectrogramBlendMode::NORMAL: return "NORMAL";
+	case SpectrogramBlendMode::ADD: return "ADD";
+	case SpectrogramBlendMode::MULTIPLY: return "MULTIPLY";
+	case SpectrogramBlendMode::SCREEN: return "SCREEN";
+	case SpectrogramBlendMode::LUMA_KEY: return "LUMA KEY";
+	default: return "NORMAL";
+	}
+}
+
+static SpectrogramBlendMode nextSpectrogramBlendMode(SpectrogramBlendMode mode) {
+	int v = ((int)mode + 1) % 5;
+	return (SpectrogramBlendMode)v;
+}
+
+static ofBlendMode ofBlendModeFromSpectrogramBlendMode(SpectrogramBlendMode mode) {
+	switch (mode) {
+	case SpectrogramBlendMode::ADD: return OF_BLENDMODE_ADD;
+	case SpectrogramBlendMode::MULTIPLY: return OF_BLENDMODE_MULTIPLY;
+	case SpectrogramBlendMode::SCREEN: return OF_BLENDMODE_SCREEN;
+	case SpectrogramBlendMode::LUMA_KEY: return OF_BLENDMODE_ALPHA;
+	case SpectrogramBlendMode::NORMAL:
+	default:
+		return OF_BLENDMODE_ALPHA;
+	}
+}
+
 static std::string shellQuote(const std::string & s) {
 	std::string out = "'";
 	for (char c : s) {
@@ -457,7 +485,10 @@ std::string ofApp::resolveThumbnailPathForPoint(const DataPoint & p) {
 	// Preferred pipeline: persistent midpoint frame cache in segments/image_segments.
 	if (!baseName.empty() && !mediaRoot.empty()) {
 		std::string imageSegPath = mediaRoot + "image_segments/" + baseName + ".png";
-		if (ofFile(imageSegPath).exists() || ensureImageSegmentForBaseName(baseName)) {
+		if (ofFile(imageSegPath).exists()) {
+			thumbnailPathByFilename[p.filename] = imageSegPath;
+			return imageSegPath;
+		} else if (allowAutoMediaGeneration && ensureImageSegmentForBaseName(baseName)) {
 			thumbnailPathByFilename[p.filename] = imageSegPath;
 			return imageSegPath;
 		}
@@ -510,8 +541,10 @@ std::shared_ptr<ofImage> ofApp::getThumbnailCached(const std::string & path, int
 	if (isVideoPath) {
 		std::string baseName = ofFilePath::removeExt(ofFilePath::getFileName(path));
 		if (baseName.empty()) return nullptr;
-		if (!ensureImageSegmentForBaseName(baseName)) return nullptr;
 		std::string imagePath = mediaRoot + "image_segments/" + baseName + ".png";
+		if (!ofFile(imagePath).exists()) {
+			if (!allowAutoMediaGeneration || !ensureImageSegmentForBaseName(baseName)) return nullptr;
+		}
 		if (!img->load(imagePath)) return nullptr;
 	} else {
 		if (!img->load(path)) {
@@ -542,6 +575,245 @@ void ofApp::pruneThumbnailCache() {
 	}
 }
 
+std::string ofApp::resolveSpectrogramPathForMedia(const std::string & mediaPath) {
+	if (mediaPath.empty()) return "";
+
+	auto memoIt = spectrogramPathByMedia.find(mediaPath);
+	if (memoIt != spectrogramPathByMedia.end()) return memoIt->second;
+
+	if (!ofFile(mediaPath).exists()) {
+		spectrogramPathByMedia[mediaPath] = "";
+		return "";
+	}
+
+	std::string baseName = ofFilePath::removeExt(ofFilePath::getFileName(mediaPath));
+	if (baseName.empty()) {
+		spectrogramPathByMedia[mediaPath] = "";
+		return "";
+	}
+
+	std::string specDir;
+	if (!mediaRoot.empty()) {
+		specDir = mediaRoot + "spectrogram_segments/";
+	} else {
+		ofFile f(mediaPath);
+		specDir = f.getEnclosingDirectory() + "spectrogram_segments/";
+	}
+	std::string imagePath = specDir + baseName + ".png";
+	if (ofFile(imagePath).exists()) {
+		spectrogramPathByMedia[mediaPath] = imagePath;
+		return imagePath;
+	}
+
+	if (!allowAutoMediaGeneration) {
+		spectrogramPathByMedia[mediaPath] = "";
+		return "";
+	}
+
+	if (!ffmpegAvailable()) {
+		spectrogramPathByMedia[mediaPath] = "";
+		return "";
+	}
+
+	ofDirectory::createDirectory(specDir, true, true);
+	std::string ffmpegBin = ffmpegExecutablePath();
+
+	std::string vf1 = "showspectrumpic=s=1536x864:legend=disabled:color=intensity:scale=log";
+	std::string cmd1 = shellQuote(ffmpegBin)
+		+ " -v error -y -i " + shellQuote(mediaPath)
+		+ " -lavfi \"" + vf1 + "\" -frames:v 1 " + shellQuote(imagePath)
+		+ " >/dev/null 2>&1";
+
+	if (std::system(cmd1.c_str()) != 0 || !ofFile(imagePath).exists()) {
+		std::string vf2 = "showspectrumpic=s=1536x864:legend=disabled";
+		std::string cmd2 = shellQuote(ffmpegBin)
+			+ " -v error -y -i " + shellQuote(mediaPath)
+			+ " -lavfi \"" + vf2 + "\" -frames:v 1 " + shellQuote(imagePath)
+			+ " >/dev/null 2>&1";
+		if (std::system(cmd2.c_str()) != 0 || !ofFile(imagePath).exists()) {
+			spectrogramPathByMedia[mediaPath] = "";
+			return "";
+		}
+	}
+
+	spectrogramPathByMedia[mediaPath] = imagePath;
+	return imagePath;
+}
+
+std::shared_ptr<ofImage> ofApp::getSpectrogramCached(const std::string & imagePath) {
+	if (imagePath.empty()) return nullptr;
+	auto it = spectrogramCache.find(imagePath);
+	if (it != spectrogramCache.end()) return it->second;
+	auto img = std::make_shared<ofImage>();
+	if (!img->load(imagePath) || !img->isAllocated()) return nullptr;
+	spectrogramCache[imagePath] = img;
+	return img;
+}
+
+std::shared_ptr<ofImage> ofApp::getSpectrogramDisplayCached(const std::string & imagePath) {
+	if (spectrogramBlendMode != SpectrogramBlendMode::LUMA_KEY) {
+		return getSpectrogramCached(imagePath);
+	}
+
+	int thresholdBucket = std::clamp((int)std::round(spectrogramLumaKeyThreshold * 255.0f), 0, 242);
+	std::string cacheKey = imagePath + "|lk|" + ofToString(thresholdBucket);
+	auto it = spectrogramDisplayCache.find(cacheKey);
+	if (it != spectrogramDisplayCache.end()) return it->second;
+
+	auto srcImg = getSpectrogramCached(imagePath);
+	if (!srcImg || !srcImg->isAllocated()) return nullptr;
+
+	const ofPixels & src = srcImg->getPixels();
+	if (!src.isAllocated() || src.getNumChannels() < 3) return srcImg;
+
+	ofPixels keyed;
+	keyed.allocate(src.getWidth(), src.getHeight(), OF_IMAGE_COLOR_ALPHA);
+	float threshold = (float)thresholdBucket;
+	float denom = std::max(1.0f, 255.0f - threshold);
+	int srcChannels = src.getNumChannels();
+	for (int y = 0; y < src.getHeight(); ++y) {
+		for (int x = 0; x < src.getWidth(); ++x) {
+			size_t srcIndex = ((size_t)y * (size_t)src.getWidth() + (size_t)x) * (size_t)srcChannels;
+			size_t dstIndex = ((size_t)y * (size_t)src.getWidth() + (size_t)x) * 4u;
+			unsigned char r = src[srcIndex + 0];
+			unsigned char g = src[srcIndex + 1];
+			unsigned char b = src[srcIndex + 2];
+			float luma = (0.2126f * (float)r) + (0.7152f * (float)g) + (0.0722f * (float)b);
+			float alphaNorm = std::clamp((luma - threshold) / denom, 0.0f, 1.0f);
+			keyed[dstIndex + 0] = r;
+			keyed[dstIndex + 1] = g;
+			keyed[dstIndex + 2] = b;
+			keyed[dstIndex + 3] = (unsigned char)std::round(alphaNorm * 255.0f);
+		}
+	}
+
+	auto keyedImg = std::make_shared<ofImage>();
+	keyedImg->setFromPixels(keyed);
+	spectrogramDisplayCache[cacheKey] = keyedImg;
+	return keyedImg;
+}
+
+void ofApp::noteTriggeredMediaForSpectrogram(const std::string & mediaPath) {
+	if (!spectrogramLayerEnabled) return;
+	std::string imagePath = resolveSpectrogramPathForMedia(mediaPath);
+	if (imagePath.empty()) return;
+	currentSpectrogramImagePath = imagePath;
+	getSpectrogramCached(imagePath);
+
+	spectrogramTrailImagePaths.push_back(imagePath);
+	int keepN = std::max(1, spectrogramTrailLength);
+	while ((int)spectrogramTrailImagePaths.size() > keepN) {
+		spectrogramTrailImagePaths.pop_front();
+	}
+}
+
+void ofApp::setMediaGenerationStatus(const std::string & status, uint64_t holdMs) {
+	mediaGenerationStatusText = status;
+	mediaGenerationStatusUntilMs = ofGetElapsedTimeMillis() + holdMs;
+}
+
+void ofApp::beginMediaAssetGeneration() {
+	if (mediaGenerationActive || mediaRoot.empty() || points.empty()) {
+		if (mediaGenerationActive) {
+			setMediaGenerationStatus("Media generation already running...", 1200);
+		} else if (mediaRoot.empty()) {
+			setMediaGenerationStatus("Cannot generate media: no media root loaded.", 1800);
+		} else if (points.empty()) {
+			setMediaGenerationStatus("Cannot generate media: no points loaded.", 1800);
+		}
+		return;
+	}
+
+	thumbnailPathByFilename.clear();
+	spectrogramPathByMedia.clear();
+	spectrogramCache.clear();
+	spectrogramDisplayCache.clear();
+
+	std::unordered_set<std::string> uniqueBaseNames;
+	std::unordered_set<std::string> uniqueMediaPaths;
+	for (const auto & p : points) {
+		if (p.filename.empty()) continue;
+		std::string baseName = ofFilePath::removeExt(p.filename);
+		if (!baseName.empty()) uniqueBaseNames.insert(baseName);
+		uniqueMediaPaths.insert(mediaRoot + p.filename);
+	}
+
+	pendingThumbnailBaseNames.clear();
+	pendingSpectrogramMediaPaths.clear();
+	for (const auto & baseName : uniqueBaseNames) {
+		std::string imageSegPath = mediaRoot + "image_segments/" + baseName + ".png";
+		if (!ofFile(imageSegPath).exists()) {
+			pendingThumbnailBaseNames.push_back(baseName);
+		}
+	}
+	for (const auto & mediaPath : uniqueMediaPaths) {
+		std::string baseName = ofFilePath::removeExt(ofFilePath::getFileName(mediaPath));
+		if (baseName.empty()) continue;
+		std::string specPath = mediaRoot + "spectrogram_segments/" + baseName + ".png";
+		if (!ofFile(specPath).exists()) {
+			pendingSpectrogramMediaPaths.push_back(mediaPath);
+		}
+	}
+
+	mediaGenerationTotal = (int)pendingThumbnailBaseNames.size() + (int)pendingSpectrogramMediaPaths.size();
+	mediaGenerationDone = 0;
+	mediaGenerationThumbGenerated = 0;
+	mediaGenerationSpecGenerated = 0;
+
+	if (mediaGenerationTotal <= 0) {
+		setMediaGenerationStatus("All thumbnails and spectrograms are already present.", 1800);
+		return;
+	}
+
+	mediaGenerationActive = true;
+	setMediaGenerationStatus(
+		"Generating media assets... 0/" + ofToString(mediaGenerationTotal),
+		600000);
+}
+
+void ofApp::processMediaAssetGenerationStep() {
+	if (!mediaGenerationActive) return;
+
+	allowAutoMediaGeneration = true;
+
+	if (!pendingThumbnailBaseNames.empty()) {
+		std::string baseName = pendingThumbnailBaseNames.front();
+		pendingThumbnailBaseNames.pop_front();
+		if (ensureImageSegmentForBaseName(baseName)) {
+			mediaGenerationThumbGenerated++;
+		}
+		mediaGenerationDone++;
+	} else if (!pendingSpectrogramMediaPaths.empty()) {
+		std::string mediaPath = pendingSpectrogramMediaPaths.front();
+		pendingSpectrogramMediaPaths.pop_front();
+		if (!resolveSpectrogramPathForMedia(mediaPath).empty()) {
+			mediaGenerationSpecGenerated++;
+		}
+		mediaGenerationDone++;
+	}
+
+	allowAutoMediaGeneration = false;
+
+	if (mediaGenerationDone < mediaGenerationTotal) {
+		setMediaGenerationStatus(
+			"Generating media assets... " + ofToString(mediaGenerationDone) + "/" + ofToString(mediaGenerationTotal)
+			+ " (thumb " + ofToString(mediaGenerationThumbGenerated)
+			+ ", spec " + ofToString(mediaGenerationSpecGenerated) + ")",
+			600000);
+	} else {
+		mediaGenerationActive = false;
+		thumbnailPathByFilename.clear();
+		spectrogramPathByMedia.clear();
+		spectrogramCache.clear();
+		spectrogramDisplayCache.clear();
+		setMediaGenerationStatus(
+			"Media generation complete. thumbs=" + ofToString(mediaGenerationThumbGenerated)
+			+ " specs=" + ofToString(mediaGenerationSpecGenerated),
+			3500);
+		ofLogNotice("ofApp") << mediaGenerationStatusText;
+	}
+}
+
 //--------------------------------------------------------------
 void ofApp::setup() {
 	ofSetBackgroundColor(20, 25, 40);
@@ -567,6 +839,11 @@ void ofApp::setup() {
 	thumbnailCache.clear();
 	thumbnailCacheLastUsed.clear();
 	thumbnailPathByFilename.clear();
+	spectrogramCache.clear();
+	spectrogramDisplayCache.clear();
+	spectrogramPathByMedia.clear();
+	currentSpectrogramImagePath.clear();
+	spectrogramTrailImagePaths.clear();
 	thumbnailExtractor = std::make_shared<ofVideoPlayer>();
 	thumbnailExtractor->setUseTexture(true);
 
@@ -635,11 +912,21 @@ void ofApp::setup() {
 	params.add(selectedPathThickness.set("Selected Path Thickness", 2.0f, 0.1f, 20.0f));
 	params.add(playheadColor.set("Playhead Color", ofColor(255), ofColor(0, 0), ofColor(255, 255)));
 	params.add(videoFitMode.set("Video Fit 0=stretch 1=height 2=width", 0, 0, 2));
-	params.add(videoDisplayMode.set("Video Mode 0=single 1=grid 2=blendmix 3=mapped 4=collage", 0, 0, 4));
+	params.add(videoDisplayMode.set("Video Mode 0=single 1=grid 2=blendmix 3=mapped 4=collage 5=mosaic", 0, 0, 5));
+	params.add(mosaicReplaceRatio.set("Mosaic Replace Ratio", 0.75f, 0.0f, 1.0f));
 	params.add(pointGlyphMode_param.set("Point Glyph 0=O 1=[] 2=X 3=# 4=cluster 5=emoji 6=thumb 7=mix", 0, 0, 7));
+	params.add(spectrogramLayerAlpha_param.set("Spectrogram Alpha", spectrogramLayerAlpha, 0.0f, 1.0f));
+	params.add(spectrogramTrailAlpha_param.set("Spectrogram Trail Alpha", spectrogramTrailAlpha, 0.0f, 1.0f));
+	params.add(spectrogramTrailLength_param.set("Spectrogram Trail Length", spectrogramTrailLength, 1, 24));
+	params.add(spectrogramLumaKeyThreshold_param.set("Spectrogram Luma Key", spectrogramLumaKeyThreshold, 0.0f, 0.95f));
+	params.add(spectrogramBlendMode_param.set("Spectrogram Blend 0=normal 1=add 2=multiply 3=screen 4=luma", (int)spectrogramBlendMode, 0, 4));
 	params.add(videoFadeSpeed_param.set("Video Fade Speed", 15.0f, 1.0f, 60.0f));
 	params.add(cloudTransitionSpeed.set("Cloud Transition Speed", 0.05f, 0.01f, 1.0f));
 	params.add(neighbourSeqGapMs_param.set("Neighbour Seq Gap (ms)", 300.0f, 50.0f, 2000.0f));
+	params.add(audioVisualFeedbackEnabled.set("Audio Visual Feedback", true));
+	params.add(audioEnergyVisualAmount.set("Audio Energy Amount", 0.35f, 0.0f, 1.0f));
+	params.add(audioOnsetVisualAmount.set("Audio Onset Amount", 0.25f, 0.0f, 1.0f));
+	params.add(audioPathWobbleAmount.set("Audio Path Wobble", 0.15f, 0.0f, 1.0f));
 
 	// Initialize Grid mode layers
 	for (int i = 0; i < (GRID_COLS * GRID_ROWS); i++) {
@@ -665,6 +952,17 @@ void ofApp::setup() {
 	collageOffsetsPx.assign(collageCount, ofVec2f(0, 0));
 	for (int i = 0; i < collageCount; i++) {
 		collagePlayers.push_back(std::make_shared<ofVideoPlayer>());
+	}
+
+	// Initialize Tile Mosaic mode (mode 5)
+	{
+		mosaicPool.reserve(kMosaicMaxHistory);
+		for (int i = 0; i < kMosaicMaxHistory; i++) {
+			mosaicPool.push_back(std::make_shared<ofVideoPlayer>());
+		}
+		mosaicHoldFbos.resize(kMosaicMaxHistory);
+		mosaicHoldAllocated.assign(kMosaicMaxHistory, false);
+		mosaicTileAssignment.assign(kMosaicCols * kMosaicRows, -1);
 	}
 
 	gui.setup(params);
@@ -716,6 +1014,9 @@ void ofApp::update() {
 		dataVisualAlpha = std::max(dataVisualAlpha - fadeStep, targetDataVisualAlpha);
 	}
 
+	// Run background media generation in small steps so UI stays responsive.
+	processMediaAssetGenerationStep();
+
 	// Smoothly animate zoom/pan towards targets.
 	if (isViewAnimating) {
 		float k = std::clamp((float)zoomAnimationSpeed.get(), 0.0f, 1.0f);
@@ -751,6 +1052,15 @@ void ofApp::update() {
 				stopPathSamples(pathToUse);
 			}
 			oscManager.sendUIPathUpdate(pathToUse->id, pathToUse->isActive, pathToUse->radius, pathToUse->direction, pathToUse->sampleNum, pathToUse->volume, pathToUse->falloff, pathToUse->speed, pathToUse->mode);
+
+		} else if (addr == "/engineready") {
+			if (m.getNumArgs() > 0 && (m.getArgType(0) == OFXOSC_TYPE_INT32 || m.getArgType(0) == OFXOSC_TYPE_INT64)) {
+				int scPort = m.getArgAsInt32(0);
+				oscManager.setSCPort(scPort);
+				ofLogNotice("OSC") << "SC engine ready, using incoming lang port: " << scPort;
+			} else {
+				ofLogNotice("OSC") << "SC engine ready (no port arg), keeping SC port: " << oscManager.getSCPort();
+			}
 
 		} else if (addr == "/o_path") {
 			// Select path by name or ID?
@@ -974,6 +1284,21 @@ void ofApp::update() {
 				pathToUse->lastJitterStepFloor = -1;
 			}
 		}
+
+		// ---- Audio feedback: onset trigger ----
+		else if (addr == "/o_onset") {
+			lastOnsetTimeMs = ofGetElapsedTimeMillis();
+		}
+
+		// ---- Audio feedback: energy level ----
+		else if (addr == "/o_energy") {
+			audioEnergy = ofClamp(m.getArgAsFloat(0), 0.0f, 1.0f);
+		}
+
+		// ---- Audio feedback visual toggle ----
+		else if (addr == "/o_visualfeedback") {
+			audioVisualFeedbackEnabled = (m.getArgAsInt32(0) != 0);
+		}
 	}
 
 	// Cloud transition interpolation
@@ -1067,6 +1392,7 @@ void ofApp::update() {
 						}
 
 						oscManager.sendSample(mediaRoot + hoveredPoint.filename, "path-0", vol, mode);
+						noteTriggeredMediaForSpectrogram(mediaRoot + hoveredPoint.filename);
 						// possibly trigger video
 						if (showVideo) triggerVideo(hoveredPoint);
 						lastHoveredPoint = hoveredPoint;
@@ -1107,6 +1433,7 @@ void ofApp::update() {
 				float vol = baseVol * volScale;
 				string mode = paths.empty() ? "once" : paths[0]->getMode();
 				oscManager.sendSample(mediaRoot + np.filename, "path-0", vol, mode);
+				noteTriggeredMediaForSpectrogram(mediaRoot + np.filename);
 				// Trigger video if enabled
 				if (showVideo) {
 					triggerVideo(np);
@@ -1157,6 +1484,7 @@ void ofApp::update() {
 							if (path->currentStepIndex < totalSteps) {
 								DataPoint & curr = path->sequentialPoints[path->currentStepIndex];
 								oscManager.sendSample(mediaRoot + curr.filename, path->name, effectiveVolume, path->getMode());
+								noteTriggeredMediaForSpectrogram(mediaRoot + curr.filename);
 								path->playingPoints.insert(curr);
 								if (showVideo && path->sendToVideo) triggerVideo(curr);
 							}
@@ -1235,6 +1563,7 @@ void ofApp::update() {
 						if (nextStepIndex >= 0 && nextStepIndex < totalSteps) {
 							DataPoint & curr = path->sequentialPoints[nextStepIndex];
 							oscManager.sendSample(mediaRoot + curr.filename, path->name, effectiveVolume, path->getMode());
+							noteTriggeredMediaForSpectrogram(mediaRoot + curr.filename);
 							path->playingPoints.insert(curr);
 							if (showVideo && path->sendToVideo) triggerVideo(curr);
 						}
@@ -1245,6 +1574,7 @@ void ofApp::update() {
 						if (startIdx < totalSteps) {
 							DataPoint & curr = path->sequentialPoints[startIdx];
 							oscManager.sendSample(mediaRoot + curr.filename, path->name, effectiveVolume, path->getMode());
+							noteTriggeredMediaForSpectrogram(mediaRoot + curr.filename);
 							path->playingPoints.insert(curr);
 							if (showVideo) triggerVideo(curr);
 							path->currentStepIndex = startIdx;
@@ -1305,6 +1635,7 @@ void ofApp::update() {
 							float vol = effectiveVolume * (1.0f - (d / path->radius));
 							vol = MAX(0, vol);
 							oscManager.sendSample(mediaRoot + p.filename, path->name, vol, path->getMode());
+							noteTriggeredMediaForSpectrogram(mediaRoot + p.filename);
 						}
 
 						// Trigger Video
@@ -1337,13 +1668,31 @@ void ofApp::update() {
 					}
 
 					if (path->mode == PathObject::CLOUD_MODE || path->mode == PathObject::MIXED_MODE) {
-						// Map path position to grain position
-						float pos = ofMap(path->position, 0.0f, 1.0f, path->gPosMin, path->gPosMax, true);
+						// Build smoother, correlated modulation so grain updates evolve instead of pure white jitter.
+						float posBase = ofMap(path->position, 0.0f, 1.0f, path->gPosMin, path->gPosMax, true);
+						float posJitter = ofRandom(-path->gRand, path->gRand) * 0.35f;
+						float pos = ofClamp(posBase + posJitter, path->gPosMin, path->gPosMax);
 
-						// Randomized grain params
-						float rate = ofRandom(path->gRateMin, path->gRateMax);
-						float dur = ofRandom(path->gDurMin, path->gDurMax);
-						int grainDensity = (int)ofRandom(path->gGrainRateMin, path->gGrainRateMax);
+						path->grainRateWalk = ofClamp(path->grainRateWalk + ofRandom(-0.08f, 0.08f), 0.0f, 1.0f);
+						path->grainDurWalk = ofClamp(path->grainDurWalk + ofRandom(-0.06f, 0.06f), 0.0f, 1.0f);
+						path->grainDensityWalk = ofClamp(path->grainDensityWalk + ofRandom(-0.09f, 0.09f), 0.0f, 1.0f);
+
+						path->grainRateWalk = ofLerp(path->grainRateWalk, 0.5f, 0.01f);
+						path->grainDurWalk = ofLerp(path->grainDurWalk, 0.5f, 0.01f);
+						path->grainDensityWalk = ofLerp(path->grainDensityWalk, 0.5f, 0.01f);
+
+						path->grainMotionPhase += dt * ofMap(path->speed, 0.0f, 0.02f, 0.08f, 0.9f, true);
+						if (path->grainMotionPhase > TWO_PI) path->grainMotionPhase -= TWO_PI;
+						float lfo = 0.5f + 0.5f * sin(path->grainMotionPhase);
+
+						float rateNorm = ofClamp(path->grainRateWalk * 0.75f + lfo * 0.25f, 0.0f, 1.0f);
+						float durNorm = ofClamp(path->grainDurWalk * 0.75f + (1.0f - lfo) * 0.25f, 0.0f, 1.0f);
+						float densNorm = ofClamp(path->grainDensityWalk * 0.65f + lfo * 0.35f, 0.0f, 1.0f);
+
+						float rate = ofLerp(path->gRateMin, path->gRateMax, rateNorm);
+						float dur = ofLerp(path->gDurMin, path->gDurMax, durNorm);
+						int grainDensity = (int)std::round(ofLerp((float)path->gGrainRateMin, (float)path->gGrainRateMax, densNorm));
+						grainDensity = ofClamp(grainDensity, path->gGrainRateMin, path->gGrainRateMax);
 
 						oscManager.updateGrain(mediaRoot + p.filename, path->name,
 							rate,
@@ -1484,6 +1833,84 @@ void ofApp::update() {
 					player->update();
 				}
 			}
+		} else if (videoDisplayMode.get() == 5) {
+			// TILE MOSAIC MODE
+			if (!videoQueue.empty()) {
+				string nextVideo = videoQueue.front();
+				videoQueue.pop_front();
+
+				int newSlot;
+				if ((int)mosaicHistorySlots.size() < kMosaicMaxHistory) {
+					// Use the next fresh slot from the pre-allocated pool
+					newSlot = (int)mosaicHistorySlots.size();
+				} else {
+					// Evict the oldest slot and reuse its player
+					int evictedSlot = mosaicHistorySlots.back();
+					mosaicHistorySlots.pop_back();
+					mosaicPool[evictedSlot]->stop();
+					mosaicPool[evictedSlot]->close();
+					// Tiles pointing to the evicted slot fall back to the next-oldest
+					int fallback = mosaicHistorySlots.empty() ? -1 : mosaicHistorySlots.back();
+					for (auto & a : mosaicTileAssignment) {
+						if (a == evictedSlot) a = fallback;
+					}
+					newSlot = evictedSlot;
+				}
+
+				mosaicPool[newSlot]->load(nextVideo);
+				mosaicPool[newSlot]->setLoopState(OF_LOOP_NORMAL);
+				mosaicPool[newSlot]->play();
+				mosaicPool[newSlot]->setVolume(0);
+				mosaicHistorySlots.push_front(newSlot);
+
+				// Randomly replace a fraction of tiles with the new video.
+				// On the very first clip, fill all tiles to avoid empty gaps.
+				int totalTiles = kMosaicCols * kMosaicRows;
+				int numToReplace = (int)std::round(totalTiles * ofClamp(mosaicReplaceRatio.get(), 0.0f, 1.0f));
+				numToReplace = std::max(0, std::min(totalTiles, numToReplace));
+				if (mosaicHistorySlots.size() == 1) {
+					numToReplace = totalTiles;
+				}
+				std::vector<int> tileIndices(totalTiles);
+				for (int i = 0; i < totalTiles; i++) tileIndices[i] = i;
+				// Fisher-Yates shuffle
+				for (int i = totalTiles - 1; i > 0; --i) {
+					int j = (int)ofRandom(0.0f, (float)(i + 1));
+					std::swap(tileIndices[i], tileIndices[j]);
+				}
+				for (int i = 0; i < numToReplace; i++) {
+					mosaicTileAssignment[tileIndices[i]] = newSlot;
+				}
+			}
+
+			// Update all active players in the history
+			for (int slot : mosaicHistorySlots) {
+				auto & player = mosaicPool[slot];
+				if (player->isLoaded() && player->isPlaying()) {
+					player->update();
+
+					// Persist the most recent valid frame to avoid transient black tiles.
+					if (player->getWidth() > 0 && player->getHeight() > 0) {
+						ofTexture & liveTex = player->getTexture();
+						if (liveTex.isAllocated()) {
+							int fw = player->getWidth();
+							int fh = player->getHeight();
+							if (!mosaicHoldAllocated[slot]
+								|| mosaicHoldFbos[slot].getWidth() != fw
+								|| mosaicHoldFbos[slot].getHeight() != fh) {
+								mosaicHoldFbos[slot].allocate(fw, fh, GL_RGB);
+								mosaicHoldAllocated[slot] = true;
+							}
+							if (player->isFrameNew()) {
+								mosaicHoldFbos[slot].begin();
+								ofSetColor(255);
+								liveTex.draw(0, 0, fw, fh);
+								mosaicHoldFbos[slot].end();
+							}
+						}
+					}
+				}
+			}
 		} else {
 			// GRID MODE
 
@@ -1540,6 +1967,19 @@ void ofApp::update() {
 
 //--------------------------------------------------------------
 void ofApp::drawVisuals() {
+	uint64_t nowMsDraw = ofGetElapsedTimeMillis();
+	float onsetPulseDraw = 0.0f;
+	if (lastOnsetTimeMs > 0 && nowMsDraw >= lastOnsetTimeMs) {
+		float dt = (float)(nowMsDraw - lastOnsetTimeMs);
+		onsetPulseDraw = ofClamp(1.0f - (dt / (float)ONSET_VISUAL_DURATION_MS), 0.0f, 1.0f);
+	}
+	float energyNormDraw = ofClamp(audioEnergy, 0.0f, 1.0f);
+	if (!audioVisualFeedbackEnabled.get()) {
+		onsetPulseDraw = 0.0f;
+		energyNormDraw = 0.0f;
+	}
+	float audioReactivePulseDraw = (energyNormDraw * audioEnergyVisualAmount.get())
+		+ (onsetPulseDraw * audioOnsetVisualAmount.get());
 
 	// Draw Video Background
 	if (showVideo) {
@@ -1727,9 +2167,89 @@ void ofApp::drawVisuals() {
 				ofPopMatrix();
 			}
 			ofSetColor(255);
+		} else if (videoDisplayMode.get() == 5) {
+			// TILE MOSAIC MODE
+			// Each tile independently shows one of up to kMosaicMaxHistory videos.
+			ofBackground(0); // black gutter base
+
+			float sw = (float)ofGetWidth();
+			float sh = (float)ofGetHeight();
+			float cellWidth = sw / kMosaicCols;
+			float cellHeight = sh / kMosaicRows;
+			float gutter = 1.0f;
+
+			ofSetColor(255);
+			for (int i = 0; i < kMosaicCols * kMosaicRows; i++) {
+				int slot = mosaicTileAssignment[i];
+				if (slot < 0 || slot >= kMosaicMaxHistory) continue;
+				auto & player = mosaicPool[slot];
+				if (!player->isLoaded() || player->getWidth() <= 0 || player->getHeight() <= 0) continue;
+
+				int col = i % kMosaicCols;
+				int row = i / kMosaicCols;
+				float cx = col * cellWidth + gutter;
+				float cy = row * cellHeight + gutter;
+				float cw = std::max(0.0f, cellWidth - (2.0f * gutter));
+				float ch = std::max(0.0f, cellHeight - (2.0f * gutter));
+
+				float vw = player->getWidth();
+				float vh = player->getHeight();
+				float srcX = ((float)col / (float)kMosaicCols) * vw;
+				float srcY = ((float)row / (float)kMosaicRows) * vh;
+				float srcW = vw / (float)kMosaicCols;
+				float srcH = vh / (float)kMosaicRows;
+
+				// Compose a full-frame image from independently assigned tile sources.
+				if (mosaicHoldAllocated[slot]) {
+					ofTexture & holdTex = mosaicHoldFbos[slot].getTexture();
+					if (holdTex.isAllocated()) {
+						holdTex.drawSubsection(cx, cy, cw, ch, srcX, srcY, srcW, srcH);
+						continue;
+					}
+				}
+
+				ofTexture & liveTex = player->getTexture();
+				if (liveTex.isAllocated()) {
+					liveTex.drawSubsection(cx, cy, cw, ch, srcX, srcY, srcW, srcH);
+				}
+			}
 		}
 	} else {
 		ofBackground(backgroundColor);
+	}
+
+	spectrogramLayerAlpha = std::clamp((float)spectrogramLayerAlpha_param.get(), 0.0f, 1.0f);
+	spectrogramTrailAlpha = std::clamp((float)spectrogramTrailAlpha_param.get(), 0.0f, 1.0f);
+	spectrogramTrailLength = std::max(1, (int)spectrogramTrailLength_param.get());
+	spectrogramLumaKeyThreshold = std::clamp((float)spectrogramLumaKeyThreshold_param.get(), 0.0f, 0.95f);
+	spectrogramBlendMode = (SpectrogramBlendMode)std::clamp((int)spectrogramBlendMode_param.get(), 0, 4);
+	while ((int)spectrogramTrailImagePaths.size() > spectrogramTrailLength) {
+		spectrogramTrailImagePaths.pop_front();
+	}
+
+	if (spectrogramLayerEnabled && !spectrogramTrailImagePaths.empty()) {
+		ofEnableBlendMode(ofBlendModeFromSpectrogramBlendMode(spectrogramBlendMode));
+		int count = std::min((int)spectrogramTrailImagePaths.size(), spectrogramTrailLength);
+		int start = std::max(0, (int)spectrogramTrailImagePaths.size() - count);
+		for (int i = 0; i < count; ++i) {
+			int idx = start + i;
+			const std::string & imgPath = spectrogramTrailImagePaths[idx];
+			auto specImg = getSpectrogramDisplayCached(imgPath);
+			if (!specImg || !specImg->isAllocated() || specImg->getWidth() <= 0 || specImg->getHeight() <= 0) {
+				continue;
+			}
+
+			float layerAlpha = spectrogramLayerAlpha;
+			if (i < count - 1) {
+				float rel = (float)(i + 1) / (float)count;
+				layerAlpha = spectrogramTrailAlpha * rel;
+			}
+			int a = (int)std::clamp(layerAlpha * 255.0f, 0.0f, 255.0f);
+			ofSetColor(255, 255, 255, a);
+			specImg->draw(0, 0, ofGetWidth(), ofGetHeight());
+		}
+		ofDisableBlendMode();
+		ofSetColor(255);
 	}
 
 	ofEnableAlphaBlending();
@@ -1806,6 +2326,8 @@ void ofApp::drawVisuals() {
 	int thumbnailLoadsRemaining = thumbnailLoadsPerFrame;
 	float screenCenterX = ofGetWidth() * 0.5f;
 	float screenCenterY = ofGetHeight() * 0.5f;
+	float audioScaleBoost = 1.0f;
+	audioScaleBoost += audioReactivePulseDraw;
 
 	// Cluster labels for glyph mode 4:
 	// unclustered => 1, then clustered groups => 2,3,4... by ascending cluster_id.
@@ -1877,7 +2399,7 @@ void ofApp::drawVisuals() {
 			}
 			scale = ofLerp(0.2f, 2.0f, val);
 		}
-		float glyphRadiusWorld = basePointRadiusWorld * scale * sizeMultiplier;
+		float glyphRadiusWorld = basePointRadiusWorld * scale * sizeMultiplier * audioScaleBoost;
 		PointGlyphMode drawMode = pointGlyphMode;
 		if (drawMode == PointGlyphMode::MIXED) {
 			uint32_t mixHash = stableStringHash(p.filename + "|" + p.text + "|" + ofToString(i));
@@ -2060,6 +2582,18 @@ void ofApp::drawVisuals() {
 	fadedPathColor.a = (int)(fadedPathColor.a * dataAlphaScale);
 	ofColor fadedSelectedPathColor = selectedPathColor.get();
 	fadedSelectedPathColor.a = (int)(fadedSelectedPathColor.a * dataAlphaScale);
+	float wobbleAmount = 0.0f;
+	if (audioVisualFeedbackEnabled.get()) {
+		wobbleAmount = ofClamp(audioReactivePulseDraw * audioPathWobbleAmount.get(), 0.0f, 1.0f);
+	}
+	float wobbleWorld = (9.0f / std::max(zoom, 0.001f)) * wobbleAmount;
+	float wobbleDeg = std::sin(ofGetElapsedTimef() * 2.1f) * (2.5f * wobbleAmount);
+	float wobbleX = std::sin(ofGetElapsedTimef() * 3.7f + 0.6f) * wobbleWorld;
+	float wobbleY = std::cos(ofGetElapsedTimef() * 3.1f + 1.2f) * wobbleWorld;
+
+	ofPushMatrix();
+	ofTranslate(wobbleX, wobbleY);
+	ofRotateDeg(wobbleDeg);
 	for (auto & path : paths) {
 		path->draw(playheadSize / zoom, fadedPlayheadColor, zoom, pathThickness.get(), selectedPathThickness.get(), fadedPathColor, fadedSelectedPathColor);
 	}
@@ -2073,6 +2607,7 @@ void ofApp::drawVisuals() {
 		// Only draw the line, not the playhead circle
 		currentPath->polyline.draw();
 	}
+	ofPopMatrix();
 
 	ofPopMatrix();
 
@@ -2092,6 +2627,7 @@ void ofApp::drawVisuals() {
 			float screenW = screenH * aspect;
 			mc.player->draw(sx - screenW * 0.5f, sy - screenH * 0.5f, screenW, screenH);
 		}
+
 	}
 
 	// Update annotation font size if changed.
@@ -2303,15 +2839,25 @@ void ofApp::drawVisuals() {
 	ofDrawBitmapString("Audio Mode: " + string(defaultPathMode == PathObject::LOOP_MODE ? "LOOP" : "ONCE"), 20, 100);
 	ofDrawBitmapString("Annotation Mode (Tab): " + string(annotationManager.isEnabled() ? "ON" : "OFF"), 20, 120);
 	ofDrawBitmapString("Point Glyph (5 cycle): " + pointGlyphModeName(pointGlyphMode), 20, 140);
+	ofDrawBitmapString("Spectrogram Layer (6): " + string(spectrogramLayerEnabled ? "ON" : "OFF"), 20, 160);
+	ofDrawBitmapString("Generate Missing Media (7): press to run", 20, 180);
+	ofDrawBitmapString("Spectrogram Blend (8): " + spectrogramBlendModeName(spectrogramBlendMode), 20, 200);
+	ofDrawBitmapString("Spectrogram Trail (GUI): N=" + ofToString(spectrogramTrailLength)
+		+ " layerA=" + ofToString(spectrogramLayerAlpha, 2)
+		+ " trailA=" + ofToString(spectrogramTrailAlpha, 2)
+		+ " luma=" + ofToString(spectrogramLumaKeyThreshold, 2), 20, 220);
+	ofDrawBitmapString("Audio Visual Feedback (9): " + string(audioVisualFeedbackEnabled.get() ? "ON" : "OFF")
+		+ " | Energy=" + ofToString(audioEnergy, 4)
+		+ " | Wobble=" + ofToString(audioPathWobbleAmount.get(), 2), 20, 240);
 	{
 		string nbStr = neighbourModeActive ? "ON" : "OFF";
 		if (neighbourModeActive && selectedPointIdx >= 0 && selectedPointIdx < (int)points.size()) {
 			nbStr += " | " + ofFilePath::getFileName(points[selectedPointIdx].filename);
 		}
-		ofDrawBitmapString("Neighbour Mode (N): " + nbStr, 20, 160);
+		ofDrawBitmapString("Neighbour Mode (N): " + nbStr, 20, 260);
 	}
 
-	int textY = 180;
+	int textY = 280;
 	if (selectedPath) {
 		ofDrawBitmapString("Selected: " + selectedPath->name + " - Video: " + (selectedPath->sendToVideo ? "ON" : "OFF"), 20, textY);
 		textY += 20;
@@ -2330,6 +2876,14 @@ void ofApp::drawVisuals() {
 		textY += 20;
 		ofDrawBitmapString("Video Playing: " + ofToString(videoFront->isPlaying()), 20, textY);
 		textY += 20;
+	}
+
+	if (!mediaGenerationStatusText.empty() && ofGetElapsedTimeMillis() <= mediaGenerationStatusUntilMs) {
+		ofSetColor(0, 0, 0, 180);
+		ofDrawRectangle(16, ofGetHeight() - 76, std::min(900, ofGetWidth() - 32), 44);
+		ofSetColor(255, 255, 255, 255);
+		ofDrawBitmapString(mediaGenerationStatusText, 28, ofGetHeight() - 49);
+		ofSetColor(debugTextColor.get());
 	}
 
 	// Draw OSC Debug
@@ -2414,6 +2968,14 @@ void ofApp::drawVisuals() {
 		ofDrawBitmapString("  Shift+m Toggle video triggering on selected path", lx, ly);
 		ly += lineH;
 		ofDrawBitmapString("  ;       Lock/Unlock new video triggers", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  6       Toggle spectrogram layer", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  7       Generate missing thumbnails + spectrograms", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  8       Cycle spectrogram blend (normal/add/multiply/screen/luma)", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  9       Toggle audio visual feedback (onset/energy)", lx, ly);
 		ly += lineH;
 		ofDrawBitmapString("  t       Toggle text labels", lx, ly);
 		ly += lineH;
@@ -2623,6 +3185,28 @@ void ofApp::keyPressed(int key) {
 		pointGlyphMode = nextPointGlyphMode(pointGlyphMode);
 		pointGlyphMode_param = (int)pointGlyphMode;
 		ofLogNotice("ofApp") << "Point Glyph Mode: " << pointGlyphModeName(pointGlyphMode);
+		return;
+	}
+	if (key == '6' || key == '^') {
+		spectrogramLayerEnabled = !spectrogramLayerEnabled;
+		ofLogNotice("ofApp") << "Spectrogram Layer: " << (spectrogramLayerEnabled ? "ON" : "OFF");
+		return;
+	}
+	if (key == '7' || key == '&') {
+		beginMediaAssetGeneration();
+		return;
+	}
+	if (key == '8' || key == '*') {
+		spectrogramBlendMode = nextSpectrogramBlendMode(spectrogramBlendMode);
+		spectrogramBlendMode_param = (int)spectrogramBlendMode;
+		ofLogNotice("ofApp") << "Spectrogram Blend Mode: "
+			<< spectrogramBlendModeName(spectrogramBlendMode);
+		return;
+	}
+	if (key == '9' || key == '(') {
+		audioVisualFeedbackEnabled = !audioVisualFeedbackEnabled.get();
+		ofLogNotice("ofApp") << "Audio Visual Feedback: "
+			<< (audioVisualFeedbackEnabled.get() ? "ON" : "OFF");
 		return;
 	}
 
@@ -2944,6 +3528,7 @@ void ofApp::keyPressed(int key) {
 					float volScale = ofLerp(0.2f, 1.0f, nearWeight);
 					float vol = baseVol * volScale;
 					oscManager.sendSample(mediaRoot + points[idx].filename, "path-0", vol, mode);
+					noteTriggeredMediaForSpectrogram(mediaRoot + points[idx].filename);
 				}
 			}
 			ofLogNotice("ofApp") << "Neighbour play all: fired " << numN << " samples";
@@ -3847,6 +4432,11 @@ bool ofApp::loadPoints(string jsonPath, bool loadGlobalAnnotations) {
 		thumbnailCache.clear();
 		thumbnailCacheLastUsed.clear();
 		thumbnailPathByFilename.clear();
+		spectrogramCache.clear();
+		spectrogramDisplayCache.clear();
+		spectrogramPathByMedia.clear();
+		currentSpectrogramImagePath.clear();
+		spectrogramTrailImagePaths.clear();
 
 		ofLogNotice("ofApp::loadPoints") << "Loading points from " << jsonPath;
 
@@ -4034,7 +4624,7 @@ bool ofApp::loadPoints(string jsonPath, bool loadGlobalAnnotations) {
 		std::sort(sortedClusterIds.begin(), sortedClusterIds.end());
 		activeClusterId = -999; // Reset filter on new load
 
-		// One-time midpoint image cache generation for thumbnail glyph mode.
+		// Thumbnail cache sizing (manual generation is triggered by keypress).
 		if (!mediaRoot.empty() && ofDirectory(mediaRoot + "video_segments/").exists()) {
 			std::unordered_set<std::string> uniqueBaseNames;
 			for (const auto & p : points) {
@@ -4044,23 +4634,11 @@ bool ofApp::loadPoints(string jsonPath, bool loadGlobalAnnotations) {
 
 			thumbnailCacheBudget = std::clamp((size_t)(uniqueBaseNames.size() + 64), (size_t)256, (size_t)4096);
 			thumbnailLoadsPerFrame = std::clamp((int)(uniqueBaseNames.size() / 24) + 8, 8, 64);
-
-			int generatedCount = 0;
-			int alreadyExistingCount = 0;
-			for (const auto & baseName : uniqueBaseNames) {
-				std::string imageSegPath = mediaRoot + "image_segments/" + baseName + ".png";
-				if (ofFile(imageSegPath).exists()) {
-					alreadyExistingCount++;
-					continue;
-				}
-				if (ensureImageSegmentForBaseName(baseName)) generatedCount++;
-			}
 			ofLogNotice("ofApp::loadPoints")
-				<< "Image segments ready. Existing: " << alreadyExistingCount
-				<< ", Generated: " << generatedCount
-				<< ", Total unique points media: " << uniqueBaseNames.size()
+				<< "Media caches configured. Unique media: " << uniqueBaseNames.size()
 				<< ", CacheBudget: " << thumbnailCacheBudget
-				<< ", LoadsPerFrame: " << thumbnailLoadsPerFrame;
+				<< ", LoadsPerFrame: " << thumbnailLoadsPerFrame
+				<< ". Press '/' to generate missing thumbnails/spectrograms.";
 		}
 
 		// Legacy global annotations are optional and intentionally disabled when

@@ -86,6 +86,10 @@ public:
 	float gRand;
 	int granularMode; // GRANULAR_ALGO_ORIG/STRETCH/GHOST/MIXED
 	int gEnv;
+	float grainRateWalk; // 0..1 correlated drift for grain rate
+	float grainDurWalk; // 0..1 correlated drift for grain duration
+	float grainDensityWalk; // 0..1 correlated drift for grain density
+	float grainMotionPhase; // Slow phase for cyclic variation
 
 	float playbackRate;
 

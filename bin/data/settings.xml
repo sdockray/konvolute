@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Visual_Settings>
 	<Background>5, 0, 4, 255</Background>
-	<Point_Color>216, 225, 98, 238</Point_Color>
+	<Point_Color>0, 255, 57, 102</Point_Color>
 	<Selected_Color>255, 100, 100, 255</Selected_Color>
 	<Hovered_Color>255, 255, 100, 255</Hovered_Color>
 	<Path_Color>234, 142, 102, 255</Path_Color>
@@ -9,22 +9,22 @@
 	<Active_Point_Color>255, 255, 255, 255</Active_Point_Color>
 	<Text_Color>255, 38, 48, 255</Text_Color>
 	<Active_Text_Color>0, 255, 0, 255</Active_Text_Color>
-	<Point_Size>4.96</Point_Size>
-	<Sel_Point_Size>1</Sel_Point_Size>
-	<Hover_Point_Size>2.755</Hover_Point_Size>
+	<Point_Size>1</Point_Size>
+	<Sel_Point_Size>4.19</Sel_Point_Size>
+	<Hover_Point_Size>14.845</Hover_Point_Size>
 	<Font_Size>11.4</Font_Size>
 	<Active_Font_Size>25.2</Active_Font_Size>
-	<Playhead_Size>23.885</Playhead_Size>
-	<Playhead_Color>218, 208, 234, 165</Playhead_Color>
-	<Video_Fade_Speed>41.415</Video_Fade_Speed>
+	<Playhead_Size>10.095</Playhead_Size>
+	<Playhead_Color>61, 234, 46, 255</Playhead_Color>
+	<Video_Fade_Speed>14.865</Video_Fade_Speed>
 	<Title_Color>255, 249, 242, 255</Title_Color>
-	<Title_Font_Size>88.68</Title_Font_Size>
+	<Title_Font_Size>29.82</Title_Font_Size>
 	<Video_Display_Layout>0</Video_Display_Layout>
 	<Watercolor_BlendMode>0</Watercolor_BlendMode>
 	<Watercolor_Decay>133</Watercolor_Decay>
 	<Path_Thickness>2.687</Path_Thickness>
 	<Selected_Path_Thickness>3.682</Selected_Path_Thickness>
-	<Debug_Text_Color>255, 255, 255, 255</Debug_Text_Color>
+	<Debug_Text_Color>158, 255, 189, 255</Debug_Text_Color>
 	<Macroblock_Size>8</Macroblock_Size>
 	<Macro_Threshold>0.035</Macro_Threshold>
 	<Datamosh_Decay>0.19145</Datamosh_Decay>
@@ -32,7 +32,17 @@
 	<Cloud_Transition_Speed>0.0298</Cloud_Transition_Speed>
 	<Neighbour_Seq_Gap__ms_>722.75</Neighbour_Seq_Gap__ms_>
 	<Annotation_Font_Size>29.8</Annotation_Font_Size>
-	<Grid_Color>120, 140, 170, 153</Grid_Color>
-	<Grid_Spacing>0.2</Grid_Spacing>
-	<Zoom_Animation_Speed>0.2</Zoom_Animation_Speed>
+	<Grid_Color>27, 140, 170, 153</Grid_Color>
+	<Grid_Spacing>0.277242</Grid_Spacing>
+	<Zoom_Animation_Speed>0.1621</Zoom_Animation_Speed>
+	<Spectrogram_Alpha>0.02</Spectrogram_Alpha>
+	<Spectrogram_Trail_Alpha>0.06</Spectrogram_Trail_Alpha>
+	<Spectrogram_Trail_Length>3</Spectrogram_Trail_Length>
+	<Spectrogram_Luma_Key>0</Spectrogram_Luma_Key>
+	<Audio_Visual_Feedback>1</Audio_Visual_Feedback>
+	<Audio_Energy_Amount>0.225</Audio_Energy_Amount>
+	<Audio_Onset_Amount>0.405</Audio_Onset_Amount>
+	<Audio_Video_FX_Amount>0.275</Audio_Video_FX_Amount>
+	<Audio_Path_Wobble>0</Audio_Path_Wobble>
+	<Mosaic_Replace_Ratio>0.955</Mosaic_Replace_Ratio>
 </Visual_Settings>

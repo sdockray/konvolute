@@ -1017,6 +1017,52 @@ void ofApp::update() {
 	// Run background media generation in small steps so UI stays responsive.
 	processMediaAssetGenerationStep();
 
+	// Camera pointer experiment: detect bright moving region and map to screen cursor.
+	if (cameraInputEnabled && cameraGrabber.isInitialized()) {
+		cameraGrabber.update();
+		if (cameraGrabber.isFrameNew()) {
+			ofPixels & px = cameraGrabber.getPixels();
+			int w = px.getWidth();
+			int h = px.getHeight();
+			int ch = px.getNumChannels();
+			if (w > 0 && h > 0 && ch >= 3) {
+				double sumX = 0.0;
+				double sumY = 0.0;
+				int count = 0;
+				for (int y = 0; y < h; y += 3) {
+					for (int x = 0; x < w; x += 3) {
+						size_t i = ((size_t)y * (size_t)w + (size_t)x) * (size_t)ch;
+						float luma = 0.2126f * px[i + 0] + 0.7152f * px[i + 1] + 0.0722f * px[i + 2];
+						if (luma >= (float)cameraThreshold) {
+							sumX += (double)x;
+							sumY += (double)y;
+							count++;
+						}
+					}
+				}
+
+				if (count >= cameraMinPixels) {
+					ofVec2f detected((float)(sumX / (double)count) / std::max(1, w - 1),
+						(float)(sumY / (double)count) / std::max(1, h - 1));
+					if (cameraMirrorX) detected.x = 1.0f - detected.x;
+					detected.x = std::clamp(detected.x, 0.0f, 1.0f);
+					detected.y = std::clamp(detected.y, 0.0f, 1.0f);
+
+					if (!cameraCursorDetected) {
+						cameraCursorNorm = detected;
+					} else {
+						cameraCursorNorm = cameraCursorNorm.getInterpolated(
+							detected, std::clamp(cameraSmoothing, 0.01f, 1.0f));
+					}
+					cameraCursorDetected = true;
+					cameraCursorScreen.set(cameraCursorNorm.x * ofGetWidth(), cameraCursorNorm.y * ofGetHeight());
+				} else {
+					cameraCursorDetected = false;
+				}
+			}
+		}
+	}
+
 	// Smoothly animate zoom/pan towards targets.
 	if (isViewAnimating) {
 		float k = std::clamp((float)zoomAnimationSpeed.get(), 0.0f, 1.0f);
@@ -1346,8 +1392,12 @@ void ofApp::update() {
 				hasHoveredPoint = false;
 			}
 		} else {
-			if (ofGetMousePressed()) {
-			ofVec2f worldPos = screenToWorld(ofGetMouseX(), ofGetMouseY());
+			bool cameraPointerActive = cameraInputEnabled && cameraCursorDetected && cameraPenDown;
+			bool pointerActive = ofGetMousePressed() || cameraPointerActive;
+			float px = cameraPointerActive ? cameraCursorScreen.x : (float)ofGetMouseX();
+			float py = cameraPointerActive ? cameraCursorScreen.y : (float)ofGetMouseY();
+			if (pointerActive) {
+			ofVec2f worldPos = screenToWorld(px, py);
 			std::vector<DataPoint> nearest = spatialGrid->findNearestNeighbors(worldPos.x, worldPos.y, 1);
 
 			if (!nearest.empty()) {
@@ -1408,6 +1458,45 @@ void ofApp::update() {
 					hasHoveredPoint = false;
 				}
 			}
+		}
+	}
+
+	// Camera freehand drawing in DRAW_FREEHAND mode.
+	if (cameraInputEnabled && currentMode == DRAW_FREEHAND) {
+		auto finalizeCameraPath = [&]() {
+			if (!isDrawingPath || !currentPath) return;
+			if (currentPath->polyline.getPerimeter() < 10.0f / zoom || currentPath->polyline.size() < 3) {
+				isDrawingPath = false;
+				currentPath = nullptr;
+				return;
+			}
+			currentPath->finalize();
+			oscManager.sendUIPathAdd(currentPath->name);
+			paths.push_back(currentPath);
+			selectedPath = currentPath;
+			selectedPath->isSelected = true;
+			for (auto & p : paths) {
+				if (p != selectedPath) p->isSelected = false;
+			}
+			isDrawingPath = false;
+			currentPath = nullptr;
+		};
+
+		if (cameraCursorDetected && cameraPenDown) {
+			ofVec2f worldPos = screenToWorld(cameraCursorScreen.x, cameraCursorScreen.y);
+			if (!isDrawingPath) {
+				currentPath = std::make_shared<PathObject>(pathIdCounter++);
+				currentPath->mode = defaultPathMode;
+				isDrawingPath = true;
+				currentPath->addPoint(worldPos);
+			} else {
+				const auto & verts = currentPath->polyline.getVertices();
+				if (verts.empty() || ofVec2f(verts.back().x, verts.back().y).distance(worldPos) > (2.0f / std::max(zoom, 1e-3f))) {
+					currentPath->addPoint(worldPos);
+				}
+			}
+		} else {
+			finalizeCameraPath();
 		}
 	}
 
@@ -2856,8 +2945,14 @@ void ofApp::drawVisuals() {
 		}
 		ofDrawBitmapString("Neighbour Mode (N): " + nbStr, 20, 260);
 	}
+	ofDrawBitmapString("Camera Control (Shift+C): "
+		+ string(cameraInputEnabled
+			? ((cameraCursorDetected ? "ON TRACKING" : "ON SEARCHING")
+				+ string(" | Pen ") + (cameraPenDown ? "DOWN" : "UP"))
+			: "OFF"),
+		20, 280);
 
-	int textY = 280;
+	int textY = 300;
 	if (selectedPath) {
 		ofDrawBitmapString("Selected: " + selectedPath->name + " - Video: " + (selectedPath->sendToVideo ? "ON" : "OFF"), 20, textY);
 		textY += 20;
@@ -2973,6 +3068,10 @@ void ofApp::drawVisuals() {
 		ly += lineH;
 		ofDrawBitmapString("  7       Generate missing thumbnails + spectrograms", lx, ly);
 		ly += lineH;
+		ofDrawBitmapString("  Shift+C Toggle camera pointer control (Browse + Draw Freehand)", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  /       Toggle camera pen down/up", lx, ly);
+		ly += lineH;
 		ofDrawBitmapString("  8       Cycle spectrogram blend (normal/add/multiply/screen/luma)", lx, ly);
 		ly += lineH;
 		ofDrawBitmapString("  9       Toggle audio visual feedback (onset/energy)", lx, ly);
@@ -3031,6 +3130,18 @@ void ofApp::drawVisuals() {
 		ofDrawCircle(mouseX, mouseY, 4.0f);
 		
 		ofSetLineWidth(1.0f); // Reset
+	}
+
+	if (cameraInputEnabled && cameraCursorDetected) {
+		float cx = cameraCursorScreen.x;
+		float cy = cameraCursorScreen.y;
+		float sz = 10.0f;
+		ofSetColor(80, 255, 120, 220);
+		ofSetLineWidth(2.0f);
+		ofDrawLine(cx - sz, cy, cx + sz, cy);
+		ofDrawLine(cx, cy - sz, cx, cy + sz);
+		ofDrawCircle(cx, cy, 5.0f);
+		ofSetLineWidth(1.0f);
 	}
 
 	if (isLoadOverlayOpen) {
@@ -3180,6 +3291,63 @@ void ofApp::keyPressed(int key) {
 
 	// Annotation system gets first crack — when typing, it consumes all keys
 	if (annotationManager.onKeyPressed(key, points)) return;
+
+	auto finalizeCurrentFreehandPath = [&]() {
+		if (!(currentMode == DRAW_FREEHAND && isDrawingPath && currentPath)) return;
+		if (currentPath->polyline.getPerimeter() < 10.0f / zoom || currentPath->polyline.size() < 3) {
+			isDrawingPath = false;
+			currentPath = nullptr;
+			return;
+		}
+		currentPath->finalize();
+		oscManager.sendUIPathAdd(currentPath->name);
+		paths.push_back(currentPath);
+		selectedPath = currentPath;
+		selectedPath->isSelected = true;
+		for (auto & p : paths) {
+			if (p != selectedPath) p->isSelected = false;
+		}
+		isDrawingPath = false;
+		currentPath = nullptr;
+	};
+
+	if (key == 'C') {
+		if (!cameraInputEnabled) {
+			if (!cameraGrabber.isInitialized()) {
+				cameraGrabber.setDeviceID(0);
+				cameraGrabber.setup(640, 480);
+			}
+			cameraInputEnabled = cameraGrabber.isInitialized();
+			cameraCursorDetected = false;
+			cameraPenDown = false;
+			if (cameraInputEnabled) {
+				setMediaGenerationStatus("Camera control ON. Press '/' for pen down/up.", 2200);
+			} else {
+				setMediaGenerationStatus("Camera control failed to initialize.", 1800);
+			}
+		} else {
+			cameraInputEnabled = false;
+			cameraCursorDetected = false;
+			cameraPenDown = false;
+			finalizeCurrentFreehandPath();
+
+			setMediaGenerationStatus("Camera control OFF", 1200);
+		}
+		return;
+	}
+
+	if (key == '/' || key == '?') {
+		if (cameraInputEnabled) {
+			cameraPenDown = !cameraPenDown;
+			if (!cameraPenDown) {
+				finalizeCurrentFreehandPath();
+			}
+			setMediaGenerationStatus(
+				std::string("Camera pen ") + (cameraPenDown ? "DOWN" : "UP"),
+				1200);
+		}
+		return;
+	}
 
 	if (key == '5' || key == '%') {
 		pointGlyphMode = nextPointGlyphMode(pointGlyphMode);

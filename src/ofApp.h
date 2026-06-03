@@ -97,6 +97,16 @@ public:
 	int pathIdCounter;
 	bool bHoldingR = false;
 	bool bHoldingV = false;
+	bool cameraInputEnabled = false;
+	bool cameraCursorDetected = false;
+	bool cameraPenDown = false;
+	bool cameraMirrorX = true;
+	int cameraThreshold = 190;
+	int cameraMinPixels = 140;
+	float cameraSmoothing = 0.22f;
+	ofVideoGrabber cameraGrabber;
+	ofVec2f cameraCursorNorm = ofVec2f(0.5f, 0.5f);
+	ofVec2f cameraCursorScreen = ofVec2f(0.0f, 0.0f);
 	int defaultPathMode = 3; // Starts at ONCE_MODE
 
 	PointCloudMode currentCloudMode = PointCloudMode::MID;

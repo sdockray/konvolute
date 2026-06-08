@@ -10,3 +10,8 @@ bin/Konvolute*
 bin/.DS_Store
 build
 build/*
+
+# MediaPipe helper build artifacts
+.venv-mediapipe-helper/
+tools/build/
+tools/dist/

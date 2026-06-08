@@ -146,3 +146,35 @@ Typing controls:
 - Zoom and pan transitions are animated.
 - Zoom-to-extents includes annotation bounds only when annotations are visible.
 - Point-state styling uses settings colors/sizes in draw: base points use `Point Color`, hovered points use `Hovered Color` + `Hover Point Size`, selected points use `Selected Color` + `Sel Point Size`, and auto-active points use `Active Point Color`.
+
+## MediaPipe End-User Packaging
+
+Konvolute receives hybrid vision data via OSC: if a hand is detected, index-finger position is used and pen is DOWN; otherwise face fallback is used (nose cursor + mouth openness for pen). To avoid requiring end users to install Python packages, ship the MediaPipe sender as a bundled helper app.
+
+### Build Helper App
+
+From the project root:
+
+```bash
+./tools/build_mediapipe_helper.sh
+```
+
+This script:
+
+- Creates a dedicated build venv at `.venv-mediapipe-helper`
+- Installs pinned dependencies from `tools/requirements-mediapipe-helper.txt`
+- Ensures both `tools/models/hand_landmarker.task` and `tools/models/face_landmarker.task` are present (downloads if missing)
+- Uses PyInstaller with `tools/mediapipe_hands_osc.spec`
+- Produces `tools/dist/MediaPipeHandsOSC.app`
+
+### Ship in Release
+
+Include `tools/dist/MediaPipeHandsOSC.app` in your release package (next to Konvolute, or inside your installer payload). End users then run the helper app before enabling MediaPipe mode in Konvolute.
+
+### Runtime Check
+
+In Konvolute debug text:
+
+- `ON NO OSC`: helper app not running or packets not reaching port 57121
+- `ON NO HAND`: OSC is flowing, but neither hand nor face is currently tracked
+- `ON TRACKING`: packets are active (`Src=HAND` or `Src=FACE`)

@@ -109,6 +109,20 @@ public:
 	ofVideoGrabber cameraGrabber;
 	ofVec2f cameraCursorNorm = ofVec2f(0.5f, 0.5f);
 	ofVec2f cameraCursorScreen = ofVec2f(0.0f, 0.0f);
+
+	// MediaPipe face (OSC-fed) input state: nose cursor + mouth openness.
+	bool mediaPipeHandsEnabled = false;
+	bool mediaPipeHandDetected = false;
+	bool mediaPipePenDown = false; // derived from mouth openness value
+	float mediaPipePinch = 0.0f; // stores mouth openness (0..1)
+	float mediaPipePinchThreshold = 0.35f;
+	float mediaPipeSmoothing = 0.35f;
+	ofVec2f mediaPipeCursorNorm = ofVec2f(0.5f, 0.5f);
+	ofVec2f mediaPipeCursorScreen = ofVec2f(0.0f, 0.0f);
+	int mediaPipeSource = 0; // 0=none, 1=hand, 2=face
+	uint64_t mediaPipeLastPacketMs = 0;
+	uint64_t mediaPipeLastSeenMs = 0;
+	uint64_t mediaPipeTimeoutMs = 350;
 	int defaultPathMode = 3; // Starts at ONCE_MODE
 
 	PointCloudMode currentCloudMode = PointCloudMode::MID;
@@ -330,6 +344,7 @@ public:
 	ofParameter<float> audioEnergyVisualAmount;
 	ofParameter<float> audioOnsetVisualAmount;
 	ofParameter<float> audioPathWobbleAmount;
+	ofParameter<bool> minimalStatusOverlay;
 
 	// Fonts
 	ofTrueTypeFont font;

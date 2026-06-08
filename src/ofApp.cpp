@@ -885,48 +885,77 @@ void ofApp::setup() {
 
 	// GUI Setup
 	params.setName("Visual Settings");
-	params.add(backgroundColor.set("Background", ofColor(20, 25, 40), ofColor(0, 0), ofColor(255, 255)));
-	params.add(pointColor.set("Point Color", ofColor(100, 150, 255), ofColor(0, 0), ofColor(255, 255)));
-	params.add(selectedColor.set("Selected Color", ofColor(255, 100, 100), ofColor(0, 0), ofColor(255, 255)));
-	params.add(hoveredColor.set("Hovered Color", ofColor(255, 255, 100), ofColor(0, 0), ofColor(255, 255)));
-	params.add(pathColor.set("Path Color", ofColor(255, 0, 144), ofColor(0, 0), ofColor(255, 255)));
-	params.add(selectedPathColor.set("Active Path Color", ofColor(255, 255, 0), ofColor(0, 0), ofColor(255, 255)));
-	params.add(activePointColor.set("Active Point Color", ofColor(255, 255, 255), ofColor(0, 0), ofColor(255, 255)));
-	params.add(textColor.set("Text Color", ofColor(255), ofColor(0, 0), ofColor(255, 255)));
-	params.add(activeTextColor.set("Active Text Color", ofColor(0, 255, 0), ofColor(0, 0), ofColor(255, 255)));
-	params.add(titleColor.set("Title Color", ofColor(255, 255, 255), ofColor(0, 0), ofColor(255, 255)));
-	params.add(debugTextColor.set("Debug Text Color", ofColor(255), ofColor(0, 0), ofColor(255, 255)));
 
-	params.add(pointSize.set("Point Size", 5.0f, 1.0f, 100.0f)); // Increased default to 5.0
-	params.add(selectedPointSize.set("Sel Point Size", 8.0f, 1.0f, 30.0f));
-	params.add(hoveredPointSize.set("Hover Point Size", 16.0f, 1.0f, 40.0f));
-	params.add(fontSize.set("Font Size", 14.0f, 8.0f, 48.0f));
-	params.add(annotationFontSize.set("Annotation Font Size", 14.0f, 8.0f, 48.0f));
-	params.add(activeFontSize.set("Active Font Size", 14.0f, 8.0f, 48.0f));
-	params.add(titleFontSize.set("Title Font Size", 48.0f, 12.0f, 120.0f));
-	params.add(gridColor.set("Grid Color", ofColor(120, 140, 170, 70), ofColor(0, 0, 0, 0), ofColor(255, 255, 255, 255)));
-	params.add(gridSpacing.set("Grid Spacing", 2.0f, 0.2f, 20.0f));
-	params.add(zoomAnimationSpeed.set("Zoom Animation Speed", 0.2f, 0.02f, 1.0f));
-	params.add(playheadSize.set("Playhead Size", 1.0f, 0.1f, 200.0f));
-	params.add(pathThickness.set("Path Thickness", 1.0f, 0.1f, 20.0f));
-	params.add(selectedPathThickness.set("Selected Path Thickness", 2.0f, 0.1f, 20.0f));
-	params.add(playheadColor.set("Playhead Color", ofColor(255), ofColor(0, 0), ofColor(255, 255)));
-	params.add(videoFitMode.set("Video Fit 0=stretch 1=height 2=width", 0, 0, 2));
-	params.add(videoDisplayMode.set("Video Mode 0=single 1=grid 2=blendmix 3=mapped 4=collage 5=mosaic", 0, 0, 5));
-	params.add(mosaicReplaceRatio.set("Mosaic Replace Ratio", 0.75f, 0.0f, 1.0f));
-	params.add(pointGlyphMode_param.set("Point Glyph 0=O 1=[] 2=X 3=# 4=cluster 5=emoji 6=thumb 7=mix", 0, 0, 7));
-	params.add(spectrogramLayerAlpha_param.set("Spectrogram Alpha", spectrogramLayerAlpha, 0.0f, 1.0f));
-	params.add(spectrogramTrailAlpha_param.set("Spectrogram Trail Alpha", spectrogramTrailAlpha, 0.0f, 1.0f));
-	params.add(spectrogramTrailLength_param.set("Spectrogram Trail Length", spectrogramTrailLength, 1, 24));
-	params.add(spectrogramLumaKeyThreshold_param.set("Spectrogram Luma Key", spectrogramLumaKeyThreshold, 0.0f, 0.95f));
-	params.add(spectrogramBlendMode_param.set("Spectrogram Blend 0=normal 1=add 2=multiply 3=screen 4=luma", (int)spectrogramBlendMode, 0, 4));
-	params.add(videoFadeSpeed_param.set("Video Fade Speed", 15.0f, 1.0f, 60.0f));
-	params.add(cloudTransitionSpeed.set("Cloud Transition Speed", 0.05f, 0.01f, 1.0f));
-	params.add(neighbourSeqGapMs_param.set("Neighbour Seq Gap (ms)", 300.0f, 50.0f, 2000.0f));
-	params.add(audioVisualFeedbackEnabled.set("Audio Visual Feedback", true));
-	params.add(audioEnergyVisualAmount.set("Audio Energy Amount", 0.35f, 0.0f, 1.0f));
-	params.add(audioOnsetVisualAmount.set("Audio Onset Amount", 0.25f, 0.0f, 1.0f));
-	params.add(audioPathWobbleAmount.set("Audio Path Wobble", 0.15f, 0.0f, 1.0f));
+	ofParameterGroup uiGroup;
+	uiGroup.setName("UI");
+	uiGroup.add(minimalStatusOverlay.set("Minimal Status Overlay", false));
+
+	ofParameterGroup colorGroup;
+	colorGroup.setName("Colors");
+	colorGroup.add(backgroundColor.set("Background", ofColor(20, 25, 40), ofColor(0, 0), ofColor(255, 255)));
+	colorGroup.add(pointColor.set("Point Color", ofColor(100, 150, 255), ofColor(0, 0), ofColor(255, 255)));
+	colorGroup.add(selectedColor.set("Selected Color", ofColor(255, 100, 100), ofColor(0, 0), ofColor(255, 255)));
+	colorGroup.add(hoveredColor.set("Hovered Color", ofColor(255, 255, 100), ofColor(0, 0), ofColor(255, 255)));
+	colorGroup.add(pathColor.set("Path Color", ofColor(255, 0, 144), ofColor(0, 0), ofColor(255, 255)));
+	colorGroup.add(selectedPathColor.set("Active Path Color", ofColor(255, 255, 0), ofColor(0, 0), ofColor(255, 255)));
+	colorGroup.add(activePointColor.set("Active Point Color", ofColor(255, 255, 255), ofColor(0, 0), ofColor(255, 255)));
+	colorGroup.add(textColor.set("Text Color", ofColor(255), ofColor(0, 0), ofColor(255, 255)));
+	colorGroup.add(activeTextColor.set("Active Text Color", ofColor(0, 255, 0), ofColor(0, 0), ofColor(255, 255)));
+	colorGroup.add(titleColor.set("Title Color", ofColor(255, 255, 255), ofColor(0, 0), ofColor(255, 255)));
+	colorGroup.add(debugTextColor.set("Debug Text Color", ofColor(255), ofColor(0, 0), ofColor(255, 255)));
+	colorGroup.add(gridColor.set("Grid Color", ofColor(120, 140, 170, 70), ofColor(0, 0, 0, 0), ofColor(255, 255, 255, 255)));
+	colorGroup.add(playheadColor.set("Playhead Color", ofColor(255), ofColor(0, 0), ofColor(255, 255)));
+
+	ofParameterGroup sizeTypeGroup;
+	sizeTypeGroup.setName("Sizes & Typography");
+	sizeTypeGroup.add(pointSize.set("Point Size", 5.0f, 1.0f, 100.0f));
+	sizeTypeGroup.add(selectedPointSize.set("Sel Point Size", 8.0f, 1.0f, 30.0f));
+	sizeTypeGroup.add(hoveredPointSize.set("Hover Point Size", 16.0f, 1.0f, 40.0f));
+	sizeTypeGroup.add(fontSize.set("Font Size", 14.0f, 8.0f, 48.0f));
+	sizeTypeGroup.add(annotationFontSize.set("Annotation Font Size", 14.0f, 8.0f, 48.0f));
+	sizeTypeGroup.add(activeFontSize.set("Active Font Size", 14.0f, 8.0f, 48.0f));
+	sizeTypeGroup.add(titleFontSize.set("Title Font Size", 48.0f, 12.0f, 120.0f));
+
+	ofParameterGroup sceneGroup;
+	sceneGroup.setName("Scene & Paths");
+	sceneGroup.add(gridSpacing.set("Grid Spacing", 2.0f, 0.2f, 20.0f));
+	sceneGroup.add(zoomAnimationSpeed.set("Zoom Animation Speed", 0.2f, 0.02f, 1.0f));
+	sceneGroup.add(playheadSize.set("Playhead Size", 1.0f, 0.1f, 200.0f));
+	sceneGroup.add(pathThickness.set("Path Thickness", 1.0f, 0.1f, 20.0f));
+	sceneGroup.add(selectedPathThickness.set("Selected Path Thickness", 2.0f, 0.1f, 20.0f));
+	sceneGroup.add(pointGlyphMode_param.set("Point Glyph 0=O 1=[] 2=X 3=# 4=cluster 5=emoji 6=thumb 7=mix", 0, 0, 7));
+	sceneGroup.add(cloudTransitionSpeed.set("Cloud Transition Speed", 0.05f, 0.01f, 1.0f));
+	sceneGroup.add(neighbourSeqGapMs_param.set("Neighbour Seq Gap (ms)", 300.0f, 50.0f, 2000.0f));
+
+	ofParameterGroup videoGroup;
+	videoGroup.setName("Video");
+	videoGroup.add(videoFitMode.set("Video Fit 0=stretch 1=height 2=width", 0, 0, 2));
+	videoGroup.add(videoDisplayMode.set("Video Mode 0=single 1=grid 2=blendmix 3=mapped 4=collage 5=mosaic", 0, 0, 5));
+	videoGroup.add(mosaicReplaceRatio.set("Mosaic Replace Ratio", 0.75f, 0.0f, 1.0f));
+	videoGroup.add(videoFadeSpeed_param.set("Video Fade Speed", 15.0f, 1.0f, 60.0f));
+
+	ofParameterGroup spectroGroup;
+	spectroGroup.setName("Spectrogram");
+	spectroGroup.add(spectrogramLayerAlpha_param.set("Spectrogram Alpha", spectrogramLayerAlpha, 0.0f, 1.0f));
+	spectroGroup.add(spectrogramTrailAlpha_param.set("Spectrogram Trail Alpha", spectrogramTrailAlpha, 0.0f, 1.0f));
+	spectroGroup.add(spectrogramTrailLength_param.set("Spectrogram Trail Length", spectrogramTrailLength, 1, 24));
+	spectroGroup.add(spectrogramLumaKeyThreshold_param.set("Spectrogram Luma Key", spectrogramLumaKeyThreshold, 0.0f, 0.95f));
+	spectroGroup.add(spectrogramBlendMode_param.set("Spectrogram Blend 0=normal 1=add 2=multiply 3=screen 4=luma", (int)spectrogramBlendMode, 0, 4));
+
+	ofParameterGroup audioGroup;
+	audioGroup.setName("Audio Reactive");
+	audioGroup.add(audioVisualFeedbackEnabled.set("Audio Visual Feedback", true));
+	audioGroup.add(audioEnergyVisualAmount.set("Audio Energy Amount", 0.35f, 0.0f, 1.0f));
+	audioGroup.add(audioOnsetVisualAmount.set("Audio Onset Amount", 0.25f, 0.0f, 1.0f));
+	audioGroup.add(audioPathWobbleAmount.set("Audio Path Wobble", 0.15f, 0.0f, 1.0f));
+
+	params.add(uiGroup);
+	params.add(colorGroup);
+	params.add(sizeTypeGroup);
+	params.add(sceneGroup);
+	params.add(videoGroup);
+	params.add(spectroGroup);
+	params.add(audioGroup);
 
 	// Initialize Grid mode layers
 	for (int i = 0; i < (GRID_COLS * GRID_ROWS); i++) {
@@ -1017,111 +1046,7 @@ void ofApp::update() {
 	// Run background media generation in small steps so UI stays responsive.
 	processMediaAssetGenerationStep();
 
-	// Camera pointer experiment: detect largest bright blob and map its centroid to cursor.
-	if (cameraInputEnabled && cameraGrabber.isInitialized()) {
-		cameraGrabber.update();
-		if (cameraGrabber.isFrameNew()) {
-			ofPixels & px = cameraGrabber.getPixels();
-			int w = px.getWidth();
-			int h = px.getHeight();
-			int ch = px.getNumChannels();
-			if (w > 0 && h > 0 && ch >= 3) {
-				const int step = 3;
-				int gw = (w + step - 1) / step;
-				int gh = (h + step - 1) / step;
-				std::vector<unsigned char> bright((size_t)gw * (size_t)gh, 0);
-
-				for (int gy = 0; gy < gh; ++gy) {
-					for (int gx = 0; gx < gw; ++gx) {
-						int x = gx * step;
-						int y = gy * step;
-						if (x >= w || y >= h) continue;
-						size_t i = ((size_t)y * (size_t)w + (size_t)x) * (size_t)ch;
-						float luma = 0.2126f * px[i + 0] + 0.7152f * px[i + 1] + 0.0722f * px[i + 2];
-						if (luma >= (float)cameraThreshold) {
-							bright[(size_t)gy * (size_t)gw + (size_t)gx] = 1;
-						}
-					}
-				}
-
-				std::vector<unsigned char> visited((size_t)gw * (size_t)gh, 0);
-				int bestArea = 0;
-				double bestSumGX = 0.0;
-				double bestSumGY = 0.0;
-				std::vector<int> stack;
-				stack.reserve((size_t)gw * (size_t)gh / 4);
-
-				for (int gy = 0; gy < gh; ++gy) {
-					for (int gx = 0; gx < gw; ++gx) {
-						size_t startIdx = (size_t)gy * (size_t)gw + (size_t)gx;
-						if (!bright[startIdx] || visited[startIdx]) continue;
-
-						int area = 0;
-						double sumGX = 0.0;
-						double sumGY = 0.0;
-						stack.clear();
-						stack.push_back((int)startIdx);
-						visited[startIdx] = 1;
-
-						while (!stack.empty()) {
-							int idx = stack.back();
-							stack.pop_back();
-							int cx = idx % gw;
-							int cy = idx / gw;
-
-							area++;
-							sumGX += (double)cx;
-							sumGY += (double)cy;
-
-							const int nx[4] = {cx - 1, cx + 1, cx, cx};
-							const int ny[4] = {cy, cy, cy - 1, cy + 1};
-							for (int k = 0; k < 4; ++k) {
-								if (nx[k] < 0 || nx[k] >= gw || ny[k] < 0 || ny[k] >= gh) continue;
-								size_t nIdx = (size_t)ny[k] * (size_t)gw + (size_t)nx[k];
-								if (!bright[nIdx] || visited[nIdx]) continue;
-								visited[nIdx] = 1;
-								stack.push_back((int)nIdx);
-							}
-						}
-
-						if (area > bestArea) {
-							bestArea = area;
-							bestSumGX = sumGX;
-							bestSumGY = sumGY;
-						}
-					}
-				}
-
-				if (bestArea >= cameraMinPixels) {
-					double meanGX = bestSumGX / (double)bestArea;
-					double meanGY = bestSumGY / (double)bestArea;
-					float pxX = (float)((meanGX + 0.5) * (double)step);
-					float pxY = (float)((meanGY + 0.5) * (double)step);
-
-					ofVec2f detected(pxX / std::max(1, w - 1),
-						pxY / std::max(1, h - 1));
-					if (cameraMirrorX) detected.x = 1.0f - detected.x;
-					detected.x = std::clamp(detected.x, 0.0f, 1.0f);
-					detected.y = std::clamp(detected.y, 0.0f, 1.0f);
-
-					if (!cameraCursorDetected) {
-						cameraCursorNorm = detected;
-					} else {
-						cameraCursorNorm = cameraCursorNorm.getInterpolated(
-							detected, std::clamp(cameraSmoothing, 0.01f, 1.0f));
-					}
-					cameraLostFrames = 0;
-					cameraCursorDetected = true;
-					cameraCursorScreen.set(cameraCursorNorm.x * ofGetWidth(), cameraCursorNorm.y * ofGetHeight());
-				} else {
-					cameraLostFrames++;
-					if (cameraLostFrames > cameraMaxLostFrames) {
-						cameraCursorDetected = false;
-					}
-				}
-			}
-		}
-	}
+	// Camera blob mode was replaced by MediaPipe OSC input.
 
 	// Smoothly animate zoom/pan towards targets.
 	if (isViewAnimating) {
@@ -1140,6 +1065,58 @@ void ofApp::update() {
 	ofxOscMessage m;
 	while (oscManager.getNextMessage(m)) {
 		std::string addr = m.getAddress();
+
+		if (addr == "/mp/hand") {
+			// Expected args: active(int), x(float 0..1), y(float 0..1), control(float 0..1), [source]
+			if (m.getNumArgs() >= 4) {
+				bool active = false;
+				mediaPipeLastPacketMs = ofGetElapsedTimeMillis();
+				if (m.getArgType(0) == OFXOSC_TYPE_INT32 || m.getArgType(0) == OFXOSC_TYPE_INT64) {
+					active = (m.getArgAsInt32(0) != 0);
+				} else if (m.getArgType(0) == OFXOSC_TYPE_FLOAT) {
+					active = (m.getArgAsFloat(0) > 0.5f);
+				} else if (m.getArgType(0) == OFXOSC_TYPE_STRING) {
+					std::string v = ofToLower(m.getArgAsString(0));
+					active = (v == "1" || v == "true" || v == "on");
+				}
+
+				if (active) {
+					float x = std::clamp(m.getArgAsFloat(1), 0.0f, 1.0f);
+					float y = std::clamp(m.getArgAsFloat(2), 0.0f, 1.0f);
+					float mouthOpen = std::clamp(m.getArgAsFloat(3), 0.0f, 1.0f);
+					int source = 0;
+					if (m.getNumArgs() >= 5) {
+						if (m.getArgType(4) == OFXOSC_TYPE_INT32 || m.getArgType(4) == OFXOSC_TYPE_INT64) {
+							source = m.getArgAsInt32(4);
+						} else if (m.getArgType(4) == OFXOSC_TYPE_FLOAT) {
+							source = (int)std::round(m.getArgAsFloat(4));
+						}
+					}
+					ofVec2f detected(x, y);
+
+					if (!mediaPipeHandDetected) {
+						mediaPipeCursorNorm = detected;
+					} else {
+						mediaPipeCursorNorm = mediaPipeCursorNorm.getInterpolated(
+							detected, std::clamp(mediaPipeSmoothing, 0.01f, 1.0f));
+					}
+
+					mediaPipeHandDetected = true;
+					mediaPipePinch = mouthOpen;
+					mediaPipeSource = source;
+					// Pen semantics: mouth open means pen DOWN.
+					mediaPipePenDown = (mediaPipePinch >= mediaPipePinchThreshold);
+					mediaPipeLastSeenMs = ofGetElapsedTimeMillis();
+					mediaPipeCursorScreen.set(mediaPipeCursorNorm.x * ofGetWidth(), mediaPipeCursorNorm.y * ofGetHeight());
+				} else {
+					mediaPipeHandDetected = false;
+					mediaPipePenDown = false;
+					mediaPipePinch = 0.0f;
+					mediaPipeSource = 0;
+				}
+			}
+			continue;
+		}
 
 		// Find "selected" path or default to path-0
 		// Processing logic: "pathToUse = browsePath; if (selectedPath != null) pathToUse = selectedPath;"
@@ -1407,6 +1384,16 @@ void ofApp::update() {
 		}
 	}
 
+	if (mediaPipeHandsEnabled) {
+		uint64_t nowMs = ofGetElapsedTimeMillis();
+		if (mediaPipeHandDetected && (nowMs - mediaPipeLastSeenMs) > mediaPipeTimeoutMs) {
+			mediaPipeHandDetected = false;
+			mediaPipePenDown = false;
+			mediaPipePinch = 0.0f;
+			mediaPipeSource = 0;
+		}
+	}
+
 	// Cloud transition interpolation
 	bool pointsMoved = false;
 	for (auto & p : points) {
@@ -1452,10 +1439,10 @@ void ofApp::update() {
 				hasHoveredPoint = false;
 			}
 		} else {
-			bool cameraPointerActive = cameraInputEnabled && cameraCursorDetected && cameraPenDown;
-			bool pointerActive = ofGetMousePressed() || cameraPointerActive;
-			float px = cameraPointerActive ? cameraCursorScreen.x : (float)ofGetMouseX();
-			float py = cameraPointerActive ? cameraCursorScreen.y : (float)ofGetMouseY();
+			bool handPointerActive = mediaPipeHandsEnabled && mediaPipeHandDetected && mediaPipePenDown;
+			bool pointerActive = ofGetMousePressed() || handPointerActive;
+			float px = handPointerActive ? mediaPipeCursorScreen.x : (float)ofGetMouseX();
+			float py = handPointerActive ? mediaPipeCursorScreen.y : (float)ofGetMouseY();
 			if (pointerActive) {
 			ofVec2f worldPos = screenToWorld(px, py);
 			std::vector<DataPoint> nearest = spatialGrid->findNearestNeighbors(worldPos.x, worldPos.y, 1);
@@ -1521,9 +1508,9 @@ void ofApp::update() {
 		}
 	}
 
-	// Camera freehand drawing in DRAW_FREEHAND mode.
-	if (cameraInputEnabled && currentMode == DRAW_FREEHAND) {
-		auto finalizeCameraPath = [&]() {
+	// MediaPipe-input freehand drawing in DRAW_FREEHAND mode.
+	if (mediaPipeHandsEnabled && currentMode == DRAW_FREEHAND) {
+		auto finalizeVisionPath = [&]() {
 			if (!isDrawingPath || !currentPath) return;
 			if (currentPath->polyline.size() < 2) {
 				isDrawingPath = false;
@@ -1542,8 +1529,12 @@ void ofApp::update() {
 			currentPath = nullptr;
 		};
 
-		if (cameraPenDown && cameraCursorDetected) {
-			ofVec2f worldPos = screenToWorld(cameraCursorScreen.x, cameraCursorScreen.y);
+		bool visionPenDown = mediaPipePenDown;
+		bool visionDetected = mediaPipeHandDetected;
+		ofVec2f visionScreen = mediaPipeCursorScreen;
+
+		if (visionPenDown && visionDetected) {
+			ofVec2f worldPos = screenToWorld(visionScreen.x, visionScreen.y);
 			if (!isDrawingPath) {
 				currentPath = std::make_shared<PathObject>(pathIdCounter++);
 				currentPath->mode = defaultPathMode;
@@ -1552,8 +1543,8 @@ void ofApp::update() {
 			} else {
 				currentPath->addPoint(worldPos);
 			}
-		} else if (!cameraPenDown) {
-			finalizeCameraPath();
+		} else if (!visionPenDown) {
+			finalizeVisionPath();
 		}
 	}
 
@@ -2943,6 +2934,7 @@ void ofApp::drawVisuals() {
 
 	// Draw UI
 	ofSetColor(debugTextColor.get());
+	bool minimalStatus = minimalStatusOverlay.get();
 	string modeStr = "";
 	switch (currentMode) {
 	case NAVIGATE:
@@ -2965,8 +2957,13 @@ void ofApp::drawVisuals() {
 		break;
 	}
 	ofDrawBitmapString("Mode: " + modeStr, 20, 20);
-	ofDrawBitmapString("Zoom: " + ofToString(zoom), 20, 40);
-	ofDrawBitmapString("Paths: " + ofToString(paths.size()), 20, 60);
+	if (minimalStatus) {
+		std::string selectedLabel = "none";
+		if (selectedPath) selectedLabel = selectedPath->name;
+		ofDrawBitmapString("Selected: " + selectedLabel, 20, 40);
+	} else {
+		ofDrawBitmapString("Zoom: " + ofToString(zoom), 20, 40);
+		ofDrawBitmapString("Paths: " + ofToString(paths.size()), 20, 60);
 	string dimStr = "NONE";
 	switch (currentThirdDimMode) {
 	case ThirdDimMode::INSTABILITY:
@@ -3002,42 +2999,58 @@ void ofApp::drawVisuals() {
 		}
 		ofDrawBitmapString("Neighbour Mode (N): " + nbStr, 20, 260);
 	}
-	ofDrawBitmapString("Camera Control (Shift+C): "
-		+ string(cameraInputEnabled
-			? ((cameraCursorDetected ? "ON TRACKING" : "ON SEARCHING")
-				+ string(" | Pen ") + (cameraPenDown ? "DOWN" : "UP"))
+	uint64_t nowMs = ofGetElapsedTimeMillis();
+	bool mediaPipeHasPackets = (mediaPipeLastPacketMs > 0)
+		&& ((nowMs - mediaPipeLastPacketMs) <= std::max<uint64_t>(mediaPipeTimeoutMs * 2, 1200));
+	std::string mediaPipeSourceLabel = "NONE";
+	if (mediaPipeSource == 1) mediaPipeSourceLabel = "HAND";
+	else if (mediaPipeSource == 2) mediaPipeSourceLabel = "FACE";
+	ofDrawBitmapString("MediaPipe Face (') : "
+		+ string(mediaPipeHandsEnabled
+			? (!mediaPipeHasPackets ? "ON NO OSC"
+				: (mediaPipeHandDetected ? "ON TRACKING" : "ON NO HAND"))
+				+ string(" | Src=") + mediaPipeSourceLabel
+				+ string(" | Ctrl=") + ofToString(mediaPipePinch, 2)
+				+ string(mediaPipePenDown ? " DOWN" : " UP")
 			: "OFF"),
 		20, 280);
 	int camPts = (isDrawingPath && currentPath) ? (int)currentPath->polyline.size() : 0;
 	string camHint = "Ready";
 	if (currentMode != DRAW_FREEHAND && !isDrawingPath) camHint = "Switch to f (Draw)";
-	else if (!cameraPenDown) camHint = "Pen is UP";
-	else if (!cameraCursorDetected) camHint = "No blob tracked";
-	ofDrawBitmapString("Camera Draw State: "
+	else if (mediaPipeHandsEnabled) {
+		if (!mediaPipeHasPackets) camHint = "No OSC packets";
+		else if (mediaPipeSource == 1) camHint = mediaPipePenDown ? "Pointing finger draws" : "Point finger to draw";
+		else if (!mediaPipePenDown) camHint = "Open mouth to draw";
+		else if (!mediaPipeHandDetected) camHint = "No face tracked";
+	} else camHint = "Enable MediaPipe with '";
+	ofDrawBitmapString("Vision Draw State: "
 		+ string(isDrawingPath ? "DRAWING" : "IDLE")
 		+ " | Points=" + ofToString(camPts)
 		+ " | " + camHint,
 		20, 300);
-
-	int textY = 320;
-	if (selectedPath) {
-		ofDrawBitmapString("Selected: " + selectedPath->name + " - Video: " + (selectedPath->sendToVideo ? "ON" : "OFF"), 20, textY);
-		textY += 20;
 	}
 
-	ofDrawBitmapString("Video Mode (m): " + ofToString(showVideo ? "ON" : "OFF"), 20, textY);
-	textY += 20;
-	ofDrawBitmapString("Video Trigger (;): " + string(videoTriggerLocked ? "LOCKED" : "UNLOCKED"), 20, textY);
-	textY += 20;
-	if (showVideo) {
-		ofDrawBitmapString("Media Root: " + mediaRoot, 20, textY);
+	if (!minimalStatus) {
+		int textY = 320;
+		if (selectedPath) {
+			ofDrawBitmapString("Selected: " + selectedPath->name + " - Video: " + (selectedPath->sendToVideo ? "ON" : "OFF"), 20, textY);
+			textY += 20;
+		}
+
+		ofDrawBitmapString("Video Mode (m): " + ofToString(showVideo ? "ON" : "OFF"), 20, textY);
 		textY += 20;
-		ofDrawBitmapString("Loaded Video: " + ofToString(videoFront->getMoviePath()), 20, textY);
+		ofDrawBitmapString("Video Trigger (;): " + string(videoTriggerLocked ? "LOCKED" : "UNLOCKED"), 20, textY);
 		textY += 20;
-		ofDrawBitmapString("Last Attempted: " + lastAttemptedVideoPath, 20, textY);
-		textY += 20;
-		ofDrawBitmapString("Video Playing: " + ofToString(videoFront->isPlaying()), 20, textY);
-		textY += 20;
+		if (showVideo) {
+			ofDrawBitmapString("Media Root: " + mediaRoot, 20, textY);
+			textY += 20;
+			ofDrawBitmapString("Loaded Video: " + ofToString(videoFront->getMoviePath()), 20, textY);
+			textY += 20;
+			ofDrawBitmapString("Last Attempted: " + lastAttemptedVideoPath, 20, textY);
+			textY += 20;
+			ofDrawBitmapString("Video Playing: " + ofToString(videoFront->isPlaying()), 20, textY);
+			textY += 20;
+		}
 	}
 
 	if (!mediaGenerationStatusText.empty() && ofGetElapsedTimeMillis() <= mediaGenerationStatusUntilMs) {
@@ -3135,9 +3148,9 @@ void ofApp::drawVisuals() {
 		ly += lineH;
 		ofDrawBitmapString("  7       Generate missing thumbnails + spectrograms", lx, ly);
 		ly += lineH;
-		ofDrawBitmapString("  Shift+C Toggle camera pointer control (Browse + Draw Freehand)", lx, ly);
+		ofDrawBitmapString("  '       Toggle MediaPipe Hybrid OSC input", lx, ly);
 		ly += lineH;
-		ofDrawBitmapString("  /       Toggle camera pen down/up", lx, ly);
+		ofDrawBitmapString("  /       Pen: hand present => down, else mouth-open => down", lx, ly);
 		ly += lineH;
 		ofDrawBitmapString("  8       Cycle spectrogram blend (normal/add/multiply/screen/luma)", lx, ly);
 		ly += lineH;
@@ -3199,11 +3212,11 @@ void ofApp::drawVisuals() {
 		ofSetLineWidth(1.0f); // Reset
 	}
 
-	if (cameraInputEnabled && cameraCursorDetected) {
-		float cx = cameraCursorScreen.x;
-		float cy = cameraCursorScreen.y;
+	if (mediaPipeHandsEnabled && mediaPipeHandDetected) {
+		float cx = mediaPipeCursorScreen.x;
+		float cy = mediaPipeCursorScreen.y;
 		float sz = 10.0f;
-		ofSetColor(80, 255, 120, 220);
+		ofSetColor(80, 190, 255, 220);
 		ofSetLineWidth(2.0f);
 		ofDrawLine(cx - sz, cy, cx + sz, cy);
 		ofDrawLine(cx, cy - sz, cx, cy + sz);
@@ -3376,28 +3389,21 @@ void ofApp::keyPressed(int key) {
 	};
 
 	if (key == 'C') {
-		if (!cameraInputEnabled) {
-			if (!cameraGrabber.isInitialized()) {
-				cameraGrabber.setDeviceID(0);
-				cameraGrabber.setup(640, 480);
-			}
-			cameraInputEnabled = cameraGrabber.isInitialized();
-			cameraCursorDetected = false;
-			cameraLostFrames = 0;
-			cameraPenDown = false;
-			if (cameraInputEnabled) {
-				setMediaGenerationStatus("Camera control ON. Press '/' for pen down/up.", 2200);
-			} else {
-				setMediaGenerationStatus("Camera control failed to initialize.", 1800);
-			}
-		} else {
-			cameraInputEnabled = false;
-			cameraCursorDetected = false;
-			cameraLostFrames = 0;
-			cameraPenDown = false;
-			finalizeCurrentFreehandPath();
+		setMediaGenerationStatus("Camera mode removed. Use ' for MediaPipe Hands.", 1700);
+		return;
+	}
 
-			setMediaGenerationStatus("Camera control OFF", 1200);
+	if (key == '\'') {
+		mediaPipeHandsEnabled = !mediaPipeHandsEnabled;
+		if (mediaPipeHandsEnabled) {
+			setMediaGenerationStatus("MediaPipe Hybrid ON (hand first, face fallback)", 1800);
+		} else {
+			mediaPipeHandDetected = false;
+			mediaPipePenDown = false;
+			mediaPipePinch = 0.0f;
+			mediaPipeSource = 0;
+			setMediaGenerationStatus("MediaPipe Face OFF", 1200);
+			finalizeCurrentFreehandPath();
 		}
 		return;
 	}
@@ -3406,22 +3412,10 @@ void ofApp::keyPressed(int key) {
 	if (annotationManager.onKeyPressed(key, points)) return;
 
 	if (key == '/' || key == '?') {
-		if (cameraInputEnabled) {
-			cameraPenDown = !cameraPenDown;
-			if (cameraPenDown && currentMode == DRAW_FREEHAND && cameraCursorDetected && !isDrawingPath) {
-				currentPath = std::make_shared<PathObject>(pathIdCounter++);
-				currentPath->mode = defaultPathMode;
-				isDrawingPath = true;
-				ofVec2f worldPos = screenToWorld(cameraCursorScreen.x, cameraCursorScreen.y);
-				currentPath->addPoint(worldPos);
-			}
-			if (!cameraPenDown) {
-				finalizeCurrentFreehandPath();
-			}
+		if (mediaPipeHandsEnabled) {
 			setMediaGenerationStatus(
-				std::string("Camera pen ") + (cameraPenDown ? "DOWN" : "UP")
-				+ (currentMode == DRAW_FREEHAND ? " | draw mode" : " | not in draw mode"),
-				1200);
+				"Hybrid pen: point finger => DOWN, else mouth open => DOWN.",
+				1300);
 		}
 		return;
 	}

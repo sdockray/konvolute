@@ -322,6 +322,7 @@ public:
 	ofParameter<float> playheadSize;
 	ofParameter<float> pathThickness;
 	ofParameter<float> selectedPathThickness;
+	ofParameter<int> pathLineStyle;
 	ofParameter<ofColor> playheadColor;
 	ofParameter<int> videoFitMode; // 0=stretch 1=fit-height 2=fit-width
 	ofParameter<float> videoFadeSpeed_param; // crossfade speed (alpha/frame)

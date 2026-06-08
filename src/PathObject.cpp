@@ -291,7 +291,7 @@ ofVec2f PathObject::getCurrentPosition() const {
 	return polyline.getPointAtPercent(position);
 }
 
-void PathObject::draw(float playheadSize, ofColor playheadColor, float zoom, float pathThickness, float selectedPathThickness, ofColor pathColor, ofColor selectedPathColor) {
+void PathObject::draw(float playheadSize, ofColor playheadColor, float zoom, float pathThickness, float selectedPathThickness, ofColor pathColor, ofColor selectedPathColor, int lineStyle) {
 	if (polyline.size() < 2)
 		return;
 
@@ -303,7 +303,35 @@ void PathObject::draw(float playheadSize, ofColor playheadColor, float zoom, flo
 		ofSetLineWidth(pathThickness);
 	}
 
-	polyline.draw();
+	if (lineStyle == 1) {
+		// Dashed line: draw segments
+		float perimeter = polyline.getPerimeter();
+		float scaledDash = 10.0f / zoom;
+		float scaledGap = 10.0f / zoom;
+		float step = scaledDash + scaledGap;
+		for (float len = 0; len < perimeter; len += step) {
+			float endLen = std::min(len + scaledDash, perimeter);
+			ofVec2f p1 = polyline.getPointAtLength(len);
+			ofVec2f p2 = polyline.getPointAtLength(endLen);
+			ofDrawLine(p1.x, p1.y, p2.x, p2.y);
+		}
+	} else if (lineStyle == 2) {
+		// Dotted line: draw circles
+		float perimeter = polyline.getPerimeter();
+		float scaledDotSpacing = 8.0f / zoom;
+		float dotRadius = (isSelected ? selectedPathThickness : pathThickness) * 0.5f;
+		float dotWorldRadius = dotRadius / zoom;
+		ofPushStyle();
+		ofFill();
+		for (float len = 0; len < perimeter; len += scaledDotSpacing) {
+			ofVec2f p = polyline.getPointAtLength(len);
+			ofDrawCircle(p.x, p.y, dotWorldRadius);
+		}
+		ofPopStyle();
+	} else {
+		// Solid line (default)
+		polyline.draw();
+	}
 
 	// Reset line width for cursor and other elements
 	ofSetLineWidth(1.0f);

@@ -923,6 +923,7 @@ void ofApp::setup() {
 	sceneGroup.add(playheadSize.set("Playhead Size", 1.0f, 0.1f, 200.0f));
 	sceneGroup.add(pathThickness.set("Path Thickness", 1.0f, 0.1f, 20.0f));
 	sceneGroup.add(selectedPathThickness.set("Selected Path Thickness", 2.0f, 0.1f, 20.0f));
+	sceneGroup.add(pathLineStyle.set("Path Line Style 0=S 1=- 2=.", 0, 0, 2));
 	sceneGroup.add(pointGlyphMode_param.set("Point Glyph 0=O 1=[] 2=X 3=# 4=cluster 5=emoji 6=thumb 7=mix", 0, 0, 7));
 	sceneGroup.add(cloudTransitionSpeed.set("Cloud Transition Speed", 0.05f, 0.01f, 1.0f));
 	sceneGroup.add(neighbourSeqGapMs_param.set("Neighbour Seq Gap (ms)", 300.0f, 50.0f, 2000.0f));
@@ -2732,17 +2733,43 @@ void ofApp::drawVisuals() {
 	ofTranslate(wobbleX, wobbleY);
 	ofRotateDeg(wobbleDeg);
 	for (auto & path : paths) {
-		path->draw(playheadSize / zoom, fadedPlayheadColor, zoom, pathThickness.get(), selectedPathThickness.get(), fadedPathColor, fadedSelectedPathColor);
+		path->draw(playheadSize / zoom, fadedPlayheadColor, zoom, pathThickness.get(), selectedPathThickness.get(), fadedPathColor, fadedSelectedPathColor, pathLineStyle.get());
 	}
 
 	// Draw current path
-	if (isDrawingPath && currentPath) {
+	if (isDrawingPath && currentPath && currentPath->polyline.size() >= 2) {
 		ofColor currentPathColor = pathColor.get();
 		currentPathColor.a = (int)(currentPathColor.a * dataAlphaScale);
 		ofSetColor(currentPathColor);
-		ofSetLineWidth(selectedPathThickness.get());
-		// Only draw the line, not the playhead circle
-		currentPath->polyline.draw();
+		float thickness = selectedPathThickness.get();
+		ofSetLineWidth(thickness);
+		
+		int style = pathLineStyle.get();
+		if (style == 1) {
+			float perimeter = currentPath->polyline.getPerimeter();
+			float scaledDash = 10.0f / zoom;
+			float scaledGap = 10.0f / zoom;
+			float step = scaledDash + scaledGap;
+			for (float len = 0; len < perimeter; len += step) {
+				float endLen = std::min(len + scaledDash, perimeter);
+				ofVec2f p1 = currentPath->polyline.getPointAtLength(len);
+				ofVec2f p2 = currentPath->polyline.getPointAtLength(endLen);
+				ofDrawLine(p1.x, p1.y, p2.x, p2.y);
+			}
+		} else if (style == 2) {
+			float perimeter = currentPath->polyline.getPerimeter();
+			float scaledDotSpacing = 8.0f / zoom;
+			float dotWorldRadius = (thickness * 0.5f) / zoom;
+			ofPushStyle();
+			ofFill();
+			for (float len = 0; len < perimeter; len += scaledDotSpacing) {
+				ofVec2f p = currentPath->polyline.getPointAtLength(len);
+				ofDrawCircle(p.x, p.y, dotWorldRadius);
+			}
+			ofPopStyle();
+		} else {
+			currentPath->polyline.draw();
+		}
 	}
 	ofPopMatrix();
 

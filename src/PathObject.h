@@ -133,7 +133,7 @@ public:
 	getActivePoints(const std::vector<DataPoint> & allPoints, SpatialGrid & grid);
 
 	// Render
-	void draw(float playheadSize = 5.0f, ofColor playheadColor = ofColor(255), float zoom = 1.0f, float pathThickness = 1.0f, float selectedPathThickness = 2.0f, ofColor pathColor = ofColor(255, 0, 144), ofColor selectedPathColor = ofColor(255, 255, 0));
+	void draw(float playheadSize = 5.0f, ofColor playheadColor = ofColor(255), float zoom = 1.0f, float pathThickness = 1.0f, float selectedPathThickness = 2.0f, ofColor pathColor = ofColor(255, 0, 144), ofColor selectedPathColor = ofColor(255, 255, 0), int lineStyle = 0);
 
 	// Internal helpers
 	std::unordered_set<DataPoint> lastActivePoints; // For edge detection (entering/leaving radius)

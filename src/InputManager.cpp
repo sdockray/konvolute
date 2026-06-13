@@ -92,6 +92,8 @@ AppCommand InputManager::getCommandForKey(int key) {
 		return CMD_TOGGLE_PINGPONG;
 	case ';':
 		return CMD_TOGGLE_VIDEO_LOCK;
+	case '.':
+		return CMD_TOGGLE_IMAGE;
 	case 'j':
 	case 'J':
 		return CMD_TOGGLE_JITTER;
@@ -102,13 +104,18 @@ AppCommand InputManager::getCommandForKey(int key) {
 	case '3':
 		return CMD_CLOUD_GLOBAL;
 	case '4':
+		return CMD_CYCLE_THIRD_DIM;
 	case '`':
 	case '~':
-		return CMD_CYCLE_THIRD_DIM;
+		return CMD_SPREAD_POINTS;
 	case '[':
 		return CMD_CLUSTER_PREV;
 	case ']':
 		return CMD_CLUSTER_NEXT;
+	case '{':
+		return CMD_DECREASE_REST_DURATION;
+	case '}':
+		return CMD_INCREASE_REST_DURATION;
 	case '\\':
 		return CMD_CLUSTER_CLEAR;
 	case 'a':

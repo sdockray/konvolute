@@ -42,6 +42,8 @@ public:
 	// Playback State
 	float position; // 0.0 - 1.0 along path
 	float speed;
+	float restDuration;
+	float restTimer;
 	int direction; // 1 = forward, 2 = oscillate (mirrors Processing constants)
 	int mode; // LOOP_MODE / CLOUD_MODE / ONCE_MODE / MIXED_MODE
 	bool isPingPong; // true = back-and-forth traversal
@@ -56,7 +58,7 @@ public:
 	bool isSequential;
 	bool isWander;
 	std::vector<DataPoint> sequentialPoints;
-	std::vector<const DataPoint*> attachedPoints; // For live tracking of moving points
+	std::vector<const DataPoint *> attachedPoints; // For live tracking of moving points
 	int currentStepIndex;
 	bool jitterMode; // Probabilistic step advance
 	int lastJitterStepFloor; // Position floor from last frame (detects step boundary crossings)
@@ -133,7 +135,7 @@ public:
 	getActivePoints(const std::vector<DataPoint> & allPoints, SpatialGrid & grid);
 
 	// Render
-	void draw(float playheadSize = 5.0f, ofColor playheadColor = ofColor(255), float zoom = 1.0f, float pathThickness = 1.0f, float selectedPathThickness = 2.0f, ofColor pathColor = ofColor(255, 0, 144), ofColor selectedPathColor = ofColor(255, 255, 0), int lineStyle = 0);
+	void draw(float playheadSize = 5.0f, ofColor playheadColor = ofColor(255), float zoom = 1.0f, float pathThickness = 1.0f, float selectedPathThickness = 2.0f, ofColor pathColor = ofColor(255, 0, 144), ofColor selectedPathColor = ofColor(255, 255, 0), int lineStyle = 0, float initialZoom = 1.0f);
 
 	// Internal helpers
 	std::unordered_set<DataPoint> lastActivePoints; // For edge detection (entering/leaving radius)

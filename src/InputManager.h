@@ -36,6 +36,7 @@ enum AppCommand {
 	CMD_TOGGLE_DEFAULT_MODE, // 'l'
 	CMD_TOGGLE_PATH_VIDEO, // 'M'
 	CMD_TOGGLE_VIDEO_LOCK, // ';'
+	CMD_TOGGLE_IMAGE, // '.'
 	CMD_TOGGLE_JITTER, // 'j'
 	CMD_CLOUD_LOCAL, // '1'
 	CMD_CLOUD_MID, // '2'
@@ -47,7 +48,10 @@ enum AppCommand {
 	CMD_TOGGLE_DATA_VISIBILITY, // 'a'
 	CMD_TOGGLE_NEIGHBOUR, // 'N' (Shift+n)
 	CMD_NEIGHBOUR_PLAY_SEQ, // 'I' when neighbour mode active
-	CMD_NEIGHBOUR_PLAY_ALL // 'U' when neighbour mode active
+	CMD_NEIGHBOUR_PLAY_ALL, // 'U' when neighbour mode active
+	CMD_INCREASE_REST_DURATION,
+	CMD_DECREASE_REST_DURATION,
+	CMD_SPREAD_POINTS
 };
 
 class InputManager {

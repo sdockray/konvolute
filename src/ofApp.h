@@ -151,6 +151,7 @@ public:
 	float zoom;
 	ofVec2f pan;
 	float targetZoom;
+	float initialZoom;
 	ofVec2f targetPan;
 	bool isViewAnimating = false;
 	bool isDragging;
@@ -244,6 +245,17 @@ public:
 	string mediaRoot;
 	string lastAttemptedVideoPath;
 
+	// Still Image Mode State
+	bool showImage;
+	ofImage currentImage;
+	std::vector<std::string> imagePaths;
+	std::string loadedImagePath;
+	std::string lastLoadedCompositionPath;
+
+	// Reshaping State
+	bool isDraggingControlPoint;
+	int draggedControlPointIdx;
+
 	// Loop gap hiding
 	float videoLastPos = 0.0f;
 	int videoIgnoreFrames = 0;
@@ -323,12 +335,17 @@ public:
 	ofParameter<float> pathThickness;
 	ofParameter<float> selectedPathThickness;
 	ofParameter<int> pathLineStyle;
+	ofParameter<float> gestureRectWidth;
+	ofParameter<float> gestureRectHeight;
+	ofParameter<float> gestureRectOffset;
 	ofParameter<ofColor> playheadColor;
 	ofParameter<int> videoFitMode; // 0=stretch 1=fit-height 2=fit-width
 	ofParameter<float> videoFadeSpeed_param; // crossfade speed (alpha/frame)
 	ofParameter<float> cloudTransitionSpeed; // transition speed between clouds
+	ofParameter<int> wanderPathSteps; // number of steps for wander path
 
 	ofParameter<int> videoDisplayMode; // 0=single, 1=grid, 2=ghost, 3=mapped, 4=collage, 5=mosaic
+	ofParameter<int> currentImageIndex; // Still image index slider
 	ofParameter<float> mosaicReplaceRatio; // fraction of tiles replaced per video trigger (0-1)
 	ofParameter<int> pointGlyphMode_param; // 0=circle 1=square 2=x 3=number 4=cluster 5=emoji 6=thumb 7=mixed
 	ofParameter<float> spectrogramLayerAlpha_param;
@@ -336,6 +353,7 @@ public:
 	ofParameter<int> spectrogramTrailLength_param;
 	ofParameter<float> spectrogramLumaKeyThreshold_param;
 	ofParameter<int> spectrogramBlendMode_param; // 0=normal 1=add 2=multiply 3=screen 4=luma
+	ofParameter<int> spectrogramColor; // 0=intensity 1=fire 2=magma 3=plasma 4=viridis 5=rainbow 6=moreland 7=nebulae 8=cool 9=fiery 10=green 11=gray
 	ofParameter<int> macroblockSize;
 	ofParameter<float> macroblockThreshold;
 	ofParameter<float> datamoshDecay;
@@ -369,9 +387,13 @@ public:
 	std::string resolveThumbnailPathForPoint(const DataPoint & p);
 	std::string findVideoSegmentPath(const std::string & baseName) const;
 	bool ensureImageSegmentForBaseName(const std::string & baseName);
+	void scanImagesDirectory();
+	void updateCurrentImage();
+	void drawStillImageIfActive();
 	std::shared_ptr<ofImage> getThumbnailCached(const std::string & path, int & loadsRemaining);
 	void pruneThumbnailCache();
 	std::string resolveSpectrogramPathForMedia(const std::string & mediaPath);
+	std::string getSpectrogramColorName(int index);
 	std::shared_ptr<ofImage> getSpectrogramCached(const std::string & imagePath);
 	std::shared_ptr<ofImage> getSpectrogramDisplayCached(const std::string & imagePath);
 	void noteTriggeredMediaForSpectrogram(const std::string & mediaPath);
@@ -380,6 +402,7 @@ public:
 	void setMediaGenerationStatus(const std::string & status, uint64_t holdMs = 1500);
 	std::shared_ptr<PathObject> createWanderingPath(const DataPoint & start,
 		int maxPoints, float randomness, int numNeighbors);
+	void spreadPointsApart();
 
 	// Composition Save/Load
 	string lastLoadedPointsPath;

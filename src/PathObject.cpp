@@ -8,6 +8,8 @@ PathObject::PathObject(int _id)
 	, isSelected(false)
 	, position(0)
 	, speed(0.001)
+	, restDuration(0.0f)
+	, restTimer(0.0f)
 	, direction(1)
 	, volume(0.5)
 	, radius(0.01)
@@ -196,6 +198,38 @@ void PathObject::update(float dt) {
 	if (!isActive)
 		return;
 
+	// Check if we are currently resting
+	if (restTimer > 0.0f) {
+		restTimer -= dt;
+		if (restTimer <= 0.0f) {
+			restTimer = 0.0f;
+			// We finished resting! Apply the transition (reverse speed or warp position) now.
+			if (position >= 1.0f) {
+				if (isPingPong) {
+					speed = -std::abs(speed);
+					position = 1.0f;
+				} else if (direction == 2) { // Oscillate
+					speed = -std::abs(speed);
+					position = 1.0f;
+				} else { // Loop
+					position = 0.0f;
+				}
+			} else if (position <= 0.0f) {
+				if (isPingPong) {
+					speed = std::abs(speed);
+					position = 0.0f;
+				} else if (direction == 2) { // Oscillate
+					speed = std::abs(speed);
+					position = 0.0f;
+				} else {
+					speed = -std::abs(speed);
+					position = 1.0f;
+				}
+			}
+		}
+		return; // Pause execution during rest duration
+	}
+
 	// Step mode: advance currentStepIndex via timer, skip polyline position logic
 	if (stepMode && isSequential && !sequentialPoints.empty()) {
 		stepTimer += speed * dt; // 1.0 speed = 1 step per second
@@ -222,7 +256,8 @@ void PathObject::update(float dt) {
 	if (hasGesture && gesturePoints.size() >= 2) {
 		float durationMs = gesturePoints.back().timeMs - gesturePoints.front().timeMs;
 		if (durationMs > 0.001f) {
-			gesturePlaybackTime += (dt * 1000.0f) * speed; // Advance time based on path speed
+			float speedFactor = speed / 0.001f;
+			gesturePlaybackTime += (dt * 1000.0f) * speedFactor;
 
 			// Wrap playback time over the gesture duration
 			float localTime = std::fmod(gesturePlaybackTime, durationMs);
@@ -261,26 +296,36 @@ void PathObject::update(float dt) {
 
 	// Loop Logic
 	if (position >= 1.0f) {
-		if (isPingPong) {
-			speed = -std::abs(speed);
+		if (restDuration > 0.0f) {
+			restTimer = restDuration;
 			position = 1.0f;
-		} else if (direction == 2) { // Oscillate
-			speed = -std::abs(speed);
-			position = 1.0f;
-		} else { // Loop
-			position = 0.0f;
+		} else {
+			if (isPingPong) {
+				speed = -std::abs(speed);
+				position = 1.0f;
+			} else if (direction == 2) { // Oscillate
+				speed = -std::abs(speed);
+				position = 1.0f;
+			} else { // Loop
+				position = 0.0f;
+			}
 		}
 	} else if (position <= 0.0f) {
-		if (isPingPong) {
-			speed = std::abs(speed);
-			position = 0.0f;
-		} else if (direction == 2) { // Oscillate
-			speed = std::abs(speed);
+		if (restDuration > 0.0f) {
+			restTimer = restDuration;
 			position = 0.0f;
 		} else {
-			speed = -std::abs(speed); // Should flip back to forward? Loop logic varies
-			// Standard loop behavior for backward playback: wrap to 1.0
-			position = 1.0f;
+			if (isPingPong) {
+				speed = std::abs(speed);
+				position = 0.0f;
+			} else if (direction == 2) { // Oscillate
+				speed = std::abs(speed);
+				position = 0.0f;
+			} else {
+				speed = -std::abs(speed); // Should flip back to forward? Loop logic varies
+				// Standard loop behavior for backward playback: wrap to 1.0
+				position = 1.0f;
+			}
 		}
 	}
 }
@@ -291,23 +336,26 @@ ofVec2f PathObject::getCurrentPosition() const {
 	return polyline.getPointAtPercent(position);
 }
 
-void PathObject::draw(float playheadSize, ofColor playheadColor, float zoom, float pathThickness, float selectedPathThickness, ofColor pathColor, ofColor selectedPathColor, int lineStyle) {
+void PathObject::draw(float playheadSize, ofColor playheadColor, float zoom, float pathThickness, float selectedPathThickness, ofColor pathColor, ofColor selectedPathColor, int lineStyle, float initialZoom) {
 	if (polyline.size() < 2)
 		return;
 
+	float safeInitialZoom = initialZoom > 0.0f ? initialZoom : 1.0f;
+	float relativeZoom = zoom / safeInitialZoom;
+
 	if (isSelected) {
 		ofSetColor(selectedPathColor);
-		ofSetLineWidth(selectedPathThickness);
+		ofSetLineWidth(std::max(1.0f, selectedPathThickness * relativeZoom));
 	} else {
 		ofSetColor(pathColor);
-		ofSetLineWidth(pathThickness);
+		ofSetLineWidth(std::max(1.0f, pathThickness * relativeZoom));
 	}
 
 	if (lineStyle == 1) {
 		// Dashed line: draw segments
 		float perimeter = polyline.getPerimeter();
-		float scaledDash = 10.0f / zoom;
-		float scaledGap = 10.0f / zoom;
+		float scaledDash = 10.0f / safeInitialZoom;
+		float scaledGap = 10.0f / safeInitialZoom;
 		float step = scaledDash + scaledGap;
 		for (float len = 0; len < perimeter; len += step) {
 			float endLen = std::min(len + scaledDash, perimeter);
@@ -318,9 +366,9 @@ void PathObject::draw(float playheadSize, ofColor playheadColor, float zoom, flo
 	} else if (lineStyle == 2) {
 		// Dotted line: draw circles
 		float perimeter = polyline.getPerimeter();
-		float scaledDotSpacing = 8.0f / zoom;
+		float scaledDotSpacing = 8.0f / safeInitialZoom;
 		float dotRadius = (isSelected ? selectedPathThickness : pathThickness) * 0.5f;
-		float dotWorldRadius = dotRadius / zoom;
+		float dotWorldRadius = dotRadius / safeInitialZoom;
 		ofPushStyle();
 		ofFill();
 		for (float len = 0; len < perimeter; len += scaledDotSpacing) {

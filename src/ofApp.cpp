@@ -20,15 +20,24 @@ static uint32_t stableStringHash(const std::string & s) {
 
 static std::string pointGlyphModeName(PointGlyphMode mode) {
 	switch (mode) {
-	case PointGlyphMode::CIRCLE: return "CIRCLE";
-	case PointGlyphMode::SQUARE: return "SQUARE";
-	case PointGlyphMode::X_MARK: return "X";
-	case PointGlyphMode::NUMBER: return "NUMBER";
-	case PointGlyphMode::CLUSTER_NUMBER: return "CLUSTER";
-	case PointGlyphMode::EMOJI: return "EMOJI";
-	case PointGlyphMode::THUMBNAIL: return "THUMB";
-	case PointGlyphMode::MIXED: return "MIXED";
-	default: return "CIRCLE";
+	case PointGlyphMode::CIRCLE:
+		return "CIRCLE";
+	case PointGlyphMode::SQUARE:
+		return "SQUARE";
+	case PointGlyphMode::X_MARK:
+		return "X";
+	case PointGlyphMode::NUMBER:
+		return "NUMBER";
+	case PointGlyphMode::CLUSTER_NUMBER:
+		return "CLUSTER";
+	case PointGlyphMode::EMOJI:
+		return "EMOJI";
+	case PointGlyphMode::THUMBNAIL:
+		return "THUMB";
+	case PointGlyphMode::MIXED:
+		return "MIXED";
+	default:
+		return "CIRCLE";
 	}
 }
 
@@ -39,12 +48,18 @@ static PointGlyphMode nextPointGlyphMode(PointGlyphMode mode) {
 
 static std::string spectrogramBlendModeName(SpectrogramBlendMode mode) {
 	switch (mode) {
-	case SpectrogramBlendMode::NORMAL: return "NORMAL";
-	case SpectrogramBlendMode::ADD: return "ADD";
-	case SpectrogramBlendMode::MULTIPLY: return "MULTIPLY";
-	case SpectrogramBlendMode::SCREEN: return "SCREEN";
-	case SpectrogramBlendMode::LUMA_KEY: return "LUMA KEY";
-	default: return "NORMAL";
+	case SpectrogramBlendMode::NORMAL:
+		return "NORMAL";
+	case SpectrogramBlendMode::ADD:
+		return "ADD";
+	case SpectrogramBlendMode::MULTIPLY:
+		return "MULTIPLY";
+	case SpectrogramBlendMode::SCREEN:
+		return "SCREEN";
+	case SpectrogramBlendMode::LUMA_KEY:
+		return "LUMA KEY";
+	default:
+		return "NORMAL";
 	}
 }
 
@@ -55,10 +70,14 @@ static SpectrogramBlendMode nextSpectrogramBlendMode(SpectrogramBlendMode mode) 
 
 static ofBlendMode ofBlendModeFromSpectrogramBlendMode(SpectrogramBlendMode mode) {
 	switch (mode) {
-	case SpectrogramBlendMode::ADD: return OF_BLENDMODE_ADD;
-	case SpectrogramBlendMode::MULTIPLY: return OF_BLENDMODE_MULTIPLY;
-	case SpectrogramBlendMode::SCREEN: return OF_BLENDMODE_SCREEN;
-	case SpectrogramBlendMode::LUMA_KEY: return OF_BLENDMODE_ALPHA;
+	case SpectrogramBlendMode::ADD:
+		return OF_BLENDMODE_ADD;
+	case SpectrogramBlendMode::MULTIPLY:
+		return OF_BLENDMODE_MULTIPLY;
+	case SpectrogramBlendMode::SCREEN:
+		return OF_BLENDMODE_SCREEN;
+	case SpectrogramBlendMode::LUMA_KEY:
+		return OF_BLENDMODE_ALPHA;
 	case SpectrogramBlendMode::NORMAL:
 	default:
 		return OF_BLENDMODE_ALPHA;
@@ -68,8 +87,10 @@ static ofBlendMode ofBlendModeFromSpectrogramBlendMode(SpectrogramBlendMode mode
 static std::string shellQuote(const std::string & s) {
 	std::string out = "'";
 	for (char c : s) {
-		if (c == '\'') out += "'\\''";
-		else out += c;
+		if (c == '\'')
+			out += "'\\''";
+		else
+			out += c;
 	}
 	out += "'";
 	return out;
@@ -228,7 +249,7 @@ std::string ofApp::findVideoSegmentPath(const std::string & baseName) const {
 	std::string videoDir = mediaRoot + "video_segments/";
 	if (!ofDirectory(videoDir).exists()) return "";
 
-	static const std::vector<std::string> exts = {"mp4", "mov", "m4v", "avi", "webm"};
+	static const std::vector<std::string> exts = { "mp4", "mov", "m4v", "avi", "webm" };
 	for (const auto & ext : exts) {
 		std::string p = videoDir + baseName + "." + ext;
 		if (ofFile(p).exists()) return p;
@@ -261,7 +282,7 @@ bool ofApp::ensureImageSegmentForBaseName(const std::string & baseName) {
 		snprintf(midBuf, sizeof(midBuf), "%.3f", std::max(0.0, mid));
 
 		std::string vf = "thumbnail=120,"
-			"scale='if(gte(iw,ih),256,-2)':'if(gte(iw,ih),-2,256)'";
+						 "scale='if(gte(iw,ih),256,-2)':'if(gte(iw,ih),-2,256)'";
 		std::string cmdAvg = shellQuote(ffmpegBin) + " -v error -y -ss " + std::string(startBuf)
 			+ " -i " + shellQuote(videoPath)
 			+ " -vf \"" + vf + "\" -frames:v 1 " + shellQuote(imagePath)
@@ -316,7 +337,8 @@ bool ofApp::ensureImageSegmentForBaseName(const std::string & baseName) {
 	thumbnailExtractor->setLoopState(OF_LOOP_NONE);
 	thumbnailExtractor->play();
 
-	for (int i = 0; i < 8; ++i) thumbnailExtractor->update();
+	for (int i = 0; i < 8; ++i)
+		thumbnailExtractor->update();
 
 	float srcW = std::max(1.0f, thumbnailExtractor->getWidth());
 	float srcH = std::max(1.0f, thumbnailExtractor->getHeight());
@@ -344,10 +366,11 @@ bool ofApp::ensureImageSegmentForBaseName(const std::string & baseName) {
 
 	for (int si = 0; si < kTemporalSamples; ++si) {
 		float t = (kTemporalSamples == 1) ? 0.5f
-			: (0.20f + 0.60f * ((float)si / (float)(kTemporalSamples - 1)));
+										  : (0.20f + 0.60f * ((float)si / (float)(kTemporalSamples - 1)));
 		thumbnailExtractor->setPosition(std::clamp(t, 0.0f, 1.0f));
 
-		for (int i = 0; i < 24; ++i) thumbnailExtractor->update();
+		for (int i = 0; i < 24; ++i)
+			thumbnailExtractor->update();
 
 		ofPixels px;
 		sampleFbo.begin();
@@ -407,7 +430,8 @@ bool ofApp::ensureImageSegmentForBaseName(const std::string & baseName) {
 		thumbnailExtractor->setLoopState(OF_LOOP_NONE);
 		thumbnailExtractor->play();
 		thumbnailExtractor->setPosition(0.5f);
-		for (int i = 0; i < 64; ++i) thumbnailExtractor->update();
+		for (int i = 0; i < 64; ++i)
+			thumbnailExtractor->update();
 		ofPixels px;
 		sampleFbo.begin();
 		ofClear(0, 0, 0, 255);
@@ -496,7 +520,7 @@ std::string ofApp::resolveThumbnailPathForPoint(const DataPoint & p) {
 
 	pushStillCandidate(p.filename);
 
-	std::vector<std::string> stillExts = {"png", "jpg", "jpeg", "webp", "bmp"};
+	std::vector<std::string> stillExts = { "png", "jpg", "jpeg", "webp", "bmp" };
 	for (const auto & e : stillExts) {
 		pushStillCandidate(baseName + "." + e);
 		pushStillCandidate("stills/" + baseName + "." + e);
@@ -599,7 +623,44 @@ std::string ofApp::resolveSpectrogramPathForMedia(const std::string & mediaPath)
 		ofFile f(mediaPath);
 		specDir = f.getEnclosingDirectory() + "spectrogram_segments/";
 	}
-	std::string imagePath = specDir + baseName + ".png";
+	std::string colorName = getSpectrogramColorName(spectrogramColor.get());
+	std::string imagePath = specDir + baseName + "_" + colorName + ".jpg";
+	if (!ofFile(imagePath).exists()) {
+		// Fallback for default color (moreland) to legacy unsuffixed filenames
+		if (colorName == "moreland") {
+			std::string legacyPath = specDir + baseName + ".jpg";
+			if (ofFile(legacyPath).exists()) {
+				imagePath = legacyPath;
+			}
+		}
+	}
+
+	// Fallback to legacy PNG format if found
+	if (!ofFile(imagePath).exists()) {
+		std::string pngPath = specDir + baseName + "_" + colorName + ".png";
+		if (ofFile(pngPath).exists()) {
+			imagePath = pngPath;
+		} else if (colorName == "moreland") {
+			std::string legacyPngPath = specDir + baseName + ".png";
+			if (ofFile(legacyPngPath).exists()) {
+				imagePath = legacyPngPath;
+			}
+		}
+	}
+
+	// Fallback to legacy WebP format if found
+	if (!ofFile(imagePath).exists()) {
+		std::string webpPath = specDir + baseName + "_" + colorName + ".webp";
+		if (ofFile(webpPath).exists()) {
+			imagePath = webpPath;
+		} else if (colorName == "moreland") {
+			std::string legacyWebpPath = specDir + baseName + ".webp";
+			if (ofFile(legacyWebpPath).exists()) {
+				imagePath = legacyWebpPath;
+			}
+		}
+	}
+
 	if (ofFile(imagePath).exists()) {
 		spectrogramPathByMedia[mediaPath] = imagePath;
 		return imagePath;
@@ -618,17 +679,17 @@ std::string ofApp::resolveSpectrogramPathForMedia(const std::string & mediaPath)
 	ofDirectory::createDirectory(specDir, true, true);
 	std::string ffmpegBin = ffmpegExecutablePath();
 
-	std::string vf1 = "showspectrumpic=s=1536x864:legend=disabled:color=intensity:scale=log";
+	std::string vf1 = "showspectrumpic=s=1536x864:legend=disabled:color=" + colorName + ":scale=log";
 	std::string cmd1 = shellQuote(ffmpegBin)
 		+ " -v error -y -i " + shellQuote(mediaPath)
-		+ " -lavfi \"" + vf1 + "\" -frames:v 1 " + shellQuote(imagePath)
+		+ " -lavfi \"" + vf1 + "\" -frames:v 1 -q:v 3 " + shellQuote(imagePath)
 		+ " >/dev/null 2>&1";
 
 	if (std::system(cmd1.c_str()) != 0 || !ofFile(imagePath).exists()) {
 		std::string vf2 = "showspectrumpic=s=1536x864:legend=disabled";
 		std::string cmd2 = shellQuote(ffmpegBin)
 			+ " -v error -y -i " + shellQuote(mediaPath)
-			+ " -lavfi \"" + vf2 + "\" -frames:v 1 " + shellQuote(imagePath)
+			+ " -lavfi \"" + vf2 + "\" -frames:v 1 -q:v 3 " + shellQuote(imagePath)
 			+ " >/dev/null 2>&1";
 		if (std::system(cmd2.c_str()) != 0 || !ofFile(imagePath).exists()) {
 			spectrogramPathByMedia[mediaPath] = "";
@@ -740,18 +801,44 @@ void ofApp::beginMediaAssetGeneration() {
 
 	pendingThumbnailBaseNames.clear();
 	pendingSpectrogramMediaPaths.clear();
+	std::string colorName = getSpectrogramColorName(spectrogramColor.get());
+	for (const auto & mediaPath : uniqueMediaPaths) {
+		std::string baseName = ofFilePath::removeExt(ofFilePath::getFileName(mediaPath));
+		if (baseName.empty()) continue;
+
+		std::string specPath = mediaRoot + "spectrogram_segments/" + baseName + "_" + colorName + ".jpg";
+		bool fileExists = ofFile(specPath).exists();
+		if (!fileExists && colorName == "moreland") {
+			fileExists = ofFile(mediaRoot + "spectrogram_segments/" + baseName + ".jpg").exists();
+		}
+
+		// Fallback check: PNG
+		if (!fileExists) {
+			std::string pngPath = mediaRoot + "spectrogram_segments/" + baseName + "_" + colorName + ".png";
+			fileExists = ofFile(pngPath).exists();
+			if (!fileExists && colorName == "moreland") {
+				fileExists = ofFile(mediaRoot + "spectrogram_segments/" + baseName + ".png").exists();
+			}
+		}
+
+		// Fallback check: WebP
+		if (!fileExists) {
+			std::string webpPath = mediaRoot + "spectrogram_segments/" + baseName + "_" + colorName + ".webp";
+			fileExists = ofFile(webpPath).exists();
+			if (!fileExists && colorName == "moreland") {
+				fileExists = ofFile(mediaRoot + "spectrogram_segments/" + baseName + ".webp").exists();
+			}
+		}
+
+		if (!fileExists) {
+			pendingSpectrogramMediaPaths.push_back(mediaPath);
+		}
+	}
+
 	for (const auto & baseName : uniqueBaseNames) {
 		std::string imageSegPath = mediaRoot + "image_segments/" + baseName + ".png";
 		if (!ofFile(imageSegPath).exists()) {
 			pendingThumbnailBaseNames.push_back(baseName);
-		}
-	}
-	for (const auto & mediaPath : uniqueMediaPaths) {
-		std::string baseName = ofFilePath::removeExt(ofFilePath::getFileName(mediaPath));
-		if (baseName.empty()) continue;
-		std::string specPath = mediaRoot + "spectrogram_segments/" + baseName + ".png";
-		if (!ofFile(specPath).exists()) {
-			pendingSpectrogramMediaPaths.push_back(mediaPath);
 		}
 	}
 
@@ -776,18 +863,18 @@ void ofApp::processMediaAssetGenerationStep() {
 
 	allowAutoMediaGeneration = true;
 
-	if (!pendingThumbnailBaseNames.empty()) {
-		std::string baseName = pendingThumbnailBaseNames.front();
-		pendingThumbnailBaseNames.pop_front();
-		if (ensureImageSegmentForBaseName(baseName)) {
-			mediaGenerationThumbGenerated++;
-		}
-		mediaGenerationDone++;
-	} else if (!pendingSpectrogramMediaPaths.empty()) {
+	if (!pendingSpectrogramMediaPaths.empty()) {
 		std::string mediaPath = pendingSpectrogramMediaPaths.front();
 		pendingSpectrogramMediaPaths.pop_front();
 		if (!resolveSpectrogramPathForMedia(mediaPath).empty()) {
 			mediaGenerationSpecGenerated++;
+		}
+		mediaGenerationDone++;
+	} else if (!pendingThumbnailBaseNames.empty()) {
+		std::string baseName = pendingThumbnailBaseNames.front();
+		pendingThumbnailBaseNames.pop_front();
+		if (ensureImageSegmentForBaseName(baseName)) {
+			mediaGenerationThumbGenerated++;
 		}
 		mediaGenerationDone++;
 	}
@@ -797,8 +884,8 @@ void ofApp::processMediaAssetGenerationStep() {
 	if (mediaGenerationDone < mediaGenerationTotal) {
 		setMediaGenerationStatus(
 			"Generating media assets... " + ofToString(mediaGenerationDone) + "/" + ofToString(mediaGenerationTotal)
-			+ " (thumb " + ofToString(mediaGenerationThumbGenerated)
-			+ ", spec " + ofToString(mediaGenerationSpecGenerated) + ")",
+				+ " (thumb " + ofToString(mediaGenerationThumbGenerated)
+				+ ", spec " + ofToString(mediaGenerationSpecGenerated) + ")",
 			600000);
 	} else {
 		mediaGenerationActive = false;
@@ -808,7 +895,7 @@ void ofApp::processMediaAssetGenerationStep() {
 		spectrogramDisplayCache.clear();
 		setMediaGenerationStatus(
 			"Media generation complete. thumbs=" + ofToString(mediaGenerationThumbGenerated)
-			+ " specs=" + ofToString(mediaGenerationSpecGenerated),
+				+ " specs=" + ofToString(mediaGenerationSpecGenerated),
 			3500);
 		ofLogNotice("ofApp") << mediaGenerationStatusText;
 	}
@@ -863,16 +950,21 @@ void ofApp::setup() {
 	zoom = 1.0f;
 	pan.set(0, 0);
 	targetZoom = zoom;
+	initialZoom = 1.0f;
 	targetPan = pan;
 	isViewAnimating = false;
 	isDragging = false;
 	isMarqueeZooming = false;
 	isRecordingGesture = false;
 	isDraggingPath = false;
+	isDraggingControlPoint = false;
+	draggedControlPointIdx = -1;
 	showVideo = false;
+	showImage = false;
 	showText = false;
 	showTitle = false;
 	compositionTitle = "";
+	lastLoadedCompositionPath = "";
 	showGui = false;
 	showHelp = false;
 	lastVideoSwitchTime = 0;
@@ -924,9 +1016,13 @@ void ofApp::setup() {
 	sceneGroup.add(pathThickness.set("Path Thickness", 1.0f, 0.1f, 20.0f));
 	sceneGroup.add(selectedPathThickness.set("Selected Path Thickness", 2.0f, 0.1f, 20.0f));
 	sceneGroup.add(pathLineStyle.set("Path Line Style 0=S 1=- 2=.", 0, 0, 2));
+	sceneGroup.add(gestureRectWidth.set("Gesture Pad Width", 250.0f, 50.0f, 1000.0f));
+	sceneGroup.add(gestureRectHeight.set("Gesture Pad Height", 180.0f, 50.0f, 1000.0f));
+	sceneGroup.add(gestureRectOffset.set("Gesture Pad Offset", 20.0f, 0.0f, 200.0f));
 	sceneGroup.add(pointGlyphMode_param.set("Point Glyph 0=O 1=[] 2=X 3=# 4=cluster 5=emoji 6=thumb 7=mix", 0, 0, 7));
 	sceneGroup.add(cloudTransitionSpeed.set("Cloud Transition Speed", 0.05f, 0.01f, 1.0f));
 	sceneGroup.add(neighbourSeqGapMs_param.set("Neighbour Seq Gap (ms)", 300.0f, 50.0f, 2000.0f));
+	sceneGroup.add(wanderPathSteps.set("Wander Path Steps", 50, 5, 250));
 
 	ofParameterGroup videoGroup;
 	videoGroup.setName("Video");
@@ -934,6 +1030,7 @@ void ofApp::setup() {
 	videoGroup.add(videoDisplayMode.set("Video Mode 0=single 1=grid 2=blendmix 3=mapped 4=collage 5=mosaic", 0, 0, 5));
 	videoGroup.add(mosaicReplaceRatio.set("Mosaic Replace Ratio", 0.75f, 0.0f, 1.0f));
 	videoGroup.add(videoFadeSpeed_param.set("Video Fade Speed", 15.0f, 1.0f, 60.0f));
+	videoGroup.add(currentImageIndex.set("Image Index", 0, 0, 0));
 
 	ofParameterGroup spectroGroup;
 	spectroGroup.setName("Spectrogram");
@@ -942,6 +1039,7 @@ void ofApp::setup() {
 	spectroGroup.add(spectrogramTrailLength_param.set("Spectrogram Trail Length", spectrogramTrailLength, 1, 24));
 	spectroGroup.add(spectrogramLumaKeyThreshold_param.set("Spectrogram Luma Key", spectrogramLumaKeyThreshold, 0.0f, 0.95f));
 	spectroGroup.add(spectrogramBlendMode_param.set("Spectrogram Blend 0=normal 1=add 2=multiply 3=screen 4=luma", (int)spectrogramBlendMode, 0, 4));
+	spectroGroup.add(spectrogramColor.set("Spectro Color 0=int 1=fire 2=mag 3=pla 4=vir 5=rain 6=more 7=neb 8=cool 9=fiery 10=grn 11=gry", 6, 0, 11));
 
 	ofParameterGroup audioGroup;
 	audioGroup.setName("Audio Reactive");
@@ -998,9 +1096,9 @@ void ofApp::setup() {
 	gui.setup(params);
 	gui.loadFromFile("settings.xml");
 
-	// Load Font - Latin Modern Roman (LaTeX-style serif)
-	bool fontLoaded = font.load("lmroman10-regular.otf", fontSize);
-	if (!fontLoaded) fontLoaded = font.load(OF_TTF_SANS, fontSize);
+	// Load Font - Latin Modern Roman (LaTeX-style serif) at a fixed high resolution to avoid aliasing and slider lag
+	bool fontLoaded = font.load("lmroman10-regular.otf", 64.0f);
+	if (!fontLoaded) fontLoaded = font.load(OF_TTF_SANS, 64.0f);
 	//bool annotationFontLoaded = annotationFont.load("lmroman10-italic.otf", annotationFontSize);
 	bool annotationFontLoaded = annotationFont.load("lmroman10-regular.otf", annotationFontSize);
 	if (!annotationFontLoaded) annotationFontLoaded = annotationFont.load(OF_TTF_SANS, annotationFontSize);
@@ -1042,6 +1140,21 @@ void ofApp::update() {
 		dataVisualAlpha = std::min(dataVisualAlpha + fadeStep, targetDataVisualAlpha);
 	} else if (dataVisualAlpha > targetDataVisualAlpha) {
 		dataVisualAlpha = std::max(dataVisualAlpha - fadeStep, targetDataVisualAlpha);
+	}
+
+	// Update currently selected still image if image mode is active
+	if (showImage) {
+		updateCurrentImage();
+	}
+
+	static int lastSpectrogramColor = -1;
+	if (lastSpectrogramColor != spectrogramColor.get()) {
+		if (lastSpectrogramColor != -1) {
+			spectrogramPathByMedia.clear();
+			spectrogramCache.clear();
+			spectrogramDisplayCache.clear();
+		}
+		lastSpectrogramColor = spectrogramColor.get();
 	}
 
 	// Run background media generation in small steps so UI stays responsive.
@@ -1445,59 +1558,59 @@ void ofApp::update() {
 			float px = handPointerActive ? mediaPipeCursorScreen.x : (float)ofGetMouseX();
 			float py = handPointerActive ? mediaPipeCursorScreen.y : (float)ofGetMouseY();
 			if (pointerActive) {
-			ofVec2f worldPos = screenToWorld(px, py);
-			std::vector<DataPoint> nearest = spatialGrid->findNearestNeighbors(worldPos.x, worldPos.y, 1);
+				ofVec2f worldPos = screenToWorld(px, py);
+				std::vector<DataPoint> nearest = spatialGrid->findNearestNeighbors(worldPos.x, worldPos.y, 1);
 
-			if (!nearest.empty()) {
-				DataPoint nearestPoint = nearest[0];
-				float distance = worldPos.distance(ofVec2f(nearestPoint.x, nearestPoint.y));
-				float threshold = 20.0f / zoom;
+				if (!nearest.empty()) {
+					DataPoint nearestPoint = nearest[0];
+					float distance = worldPos.distance(ofVec2f(nearestPoint.x, nearestPoint.y));
+					float threshold = 20.0f / zoom;
 
-				if (distance > threshold) {
-					// Too far
-					if (hasLastHoveredPoint) {
-						oscManager.stopSample(mediaRoot + lastHoveredPoint.filename, "path-0");
-						hasLastHoveredPoint = false;
-						hasHoveredPoint = false;
-					}
-				} else {
-					// Close enough
-					hoveredPoint = nearestPoint;
-					hasHoveredPoint = true;
-
-					// Track selected point index for neighbour mode
-					if (neighbourModeActive) {
-						for (int pi = 0; pi < (int)points.size(); ++pi) {
-							if (points[pi].filename == nearestPoint.filename) {
-								selectedPointIdx = pi;
-								break;
-							}
-						}
-					}
-
-					// If different from last hovered
-					if (!hasLastHoveredPoint || !(hoveredPoint == lastHoveredPoint)) {
+					if (distance > threshold) {
+						// Too far
 						if (hasLastHoveredPoint) {
 							oscManager.stopSample(mediaRoot + lastHoveredPoint.filename, "path-0");
+							hasLastHoveredPoint = false;
+							hasHoveredPoint = false;
+						}
+					} else {
+						// Close enough
+						hoveredPoint = nearestPoint;
+						hasHoveredPoint = true;
+
+						// Track selected point index for neighbour mode
+						if (neighbourModeActive) {
+							for (int pi = 0; pi < (int)points.size(); ++pi) {
+								if (points[pi].filename == nearestPoint.filename) {
+									selectedPointIdx = pi;
+									break;
+								}
+							}
 						}
 
-						// Trigger new
-						float vol = 0.5f;
-						string mode = "once";
-						if (paths.size() > 0) {
-							vol = paths[0]->volume;
-							mode = paths[0]->getMode();
-						}
+						// If different from last hovered
+						if (!hasLastHoveredPoint || !(hoveredPoint == lastHoveredPoint)) {
+							if (hasLastHoveredPoint) {
+								oscManager.stopSample(mediaRoot + lastHoveredPoint.filename, "path-0");
+							}
 
-						oscManager.sendSample(mediaRoot + hoveredPoint.filename, "path-0", vol, mode);
-						noteTriggeredMediaForSpectrogram(mediaRoot + hoveredPoint.filename);
-						// possibly trigger video
-						if (showVideo) triggerVideo(hoveredPoint);
-						lastHoveredPoint = hoveredPoint;
-						hasLastHoveredPoint = true;
+							// Trigger new
+							float vol = 0.5f;
+							string mode = "once";
+							if (paths.size() > 0) {
+								vol = paths[0]->volume;
+								mode = paths[0]->getMode();
+							}
+
+							oscManager.sendSample(mediaRoot + hoveredPoint.filename, "path-0", vol, mode);
+							noteTriggeredMediaForSpectrogram(mediaRoot + hoveredPoint.filename);
+							// possibly trigger video
+							if (showVideo) triggerVideo(hoveredPoint);
+							lastHoveredPoint = hoveredPoint;
+							hasLastHoveredPoint = true;
+						}
 					}
 				}
-			}
 			} else {
 				// Mouse not pressed - stop playing if we were
 				if (hasLastHoveredPoint) {
@@ -2010,7 +2123,8 @@ void ofApp::update() {
 					numToReplace = totalTiles;
 				}
 				std::vector<int> tileIndices(totalTiles);
-				for (int i = 0; i < totalTiles; i++) tileIndices[i] = i;
+				for (int i = 0; i < totalTiles; i++)
+					tileIndices[i] = i;
 				// Fisher-Yates shuffle
 				for (int i = totalTiles - 1; i > 0; --i) {
 					int j = (int)ofRandom(0.0f, (float)(i + 1));
@@ -2126,10 +2240,12 @@ void ofApp::drawVisuals() {
 				// Paint the last-captured frame as a persistent background.
 				// This is always opaque — covers any gap/flicker from the live player.
 				ofBackground(backgroundColor);
+				drawStillImageIfActive();
 				ofSetColor(255, 255, 255, 255);
 				videoHoldFbo.draw(0, 0, ofGetWidth(), ofGetHeight());
 			} else {
 				ofBackground(backgroundColor); // before first frame is ever captured
+				drawStillImageIfActive();
 			}
 
 			// Draw the live front player on top as it fades in (0 → 255 on clip switch).
@@ -2160,6 +2276,7 @@ void ofApp::drawVisuals() {
 		} else if (videoDisplayMode.get() == 1) {
 			// GRID MODE
 			ofBackground(backgroundColor);
+			drawStillImageIfActive();
 
 			float sw = (float)ofGetWidth();
 			float sh = (float)ofGetHeight();
@@ -2204,6 +2321,7 @@ void ofApp::drawVisuals() {
 			// BLEND MIX MODE
 			// A controlled collage stack using alternating blend modes to avoid overexposure.
 			ofBackground(backgroundColor);
+			drawStillImageIfActive();
 
 			int n = (int)ghostPlayers.size();
 			for (int i = 0; i < n; ++i) {
@@ -2251,10 +2369,12 @@ void ofApp::drawVisuals() {
 			// DATA-MAPPED MODE
 			// Draw background only here; mapped clips are rendered later above point cloud.
 			ofBackground(backgroundColor);
+			drawStillImageIfActive();
 			ofSetColor(255);
 		} else if (videoDisplayMode.get() == 4) {
 			// TILE COLLAGE MODE
 			ofBackground(backgroundColor);
+			drawStillImageIfActive();
 
 			float sw = (float)ofGetWidth();
 			float sh = (float)ofGetHeight();
@@ -2354,6 +2474,7 @@ void ofApp::drawVisuals() {
 		}
 	} else {
 		ofBackground(backgroundColor);
+		drawStillImageIfActive();
 	}
 
 	spectrogramLayerAlpha = std::clamp((float)spectrogramLayerAlpha_param.get(), 0.0f, 1.0f);
@@ -2668,7 +2789,8 @@ void ofApp::drawVisuals() {
 
 			uint64_t nowMs = ofGetElapsedTimeMillis();
 			uint64_t msSincePlayed = (neighbourLastPlayedIdx >= 0)
-				? (nowMs - neighbourLastPlayedMs) : kNeighbourFlashMs + 1;
+				? (nowMs - neighbourLastPlayedMs)
+				: kNeighbourFlashMs + 1;
 
 			ofNoFill();
 			ofSetLineWidth(1.5f);
@@ -2733,7 +2855,7 @@ void ofApp::drawVisuals() {
 	ofTranslate(wobbleX, wobbleY);
 	ofRotateDeg(wobbleDeg);
 	for (auto & path : paths) {
-		path->draw(playheadSize / zoom, fadedPlayheadColor, zoom, pathThickness.get(), selectedPathThickness.get(), fadedPathColor, fadedSelectedPathColor, pathLineStyle.get());
+		path->draw(playheadSize / zoom, fadedPlayheadColor, zoom, pathThickness.get(), selectedPathThickness.get(), fadedPathColor, fadedSelectedPathColor, pathLineStyle.get(), initialZoom);
 	}
 
 	// Draw current path
@@ -2742,13 +2864,15 @@ void ofApp::drawVisuals() {
 		currentPathColor.a = (int)(currentPathColor.a * dataAlphaScale);
 		ofSetColor(currentPathColor);
 		float thickness = selectedPathThickness.get();
-		ofSetLineWidth(thickness);
-		
+		float safeInitialZoom = initialZoom > 0.0f ? initialZoom : 1.0f;
+		float relativeZoom = zoom / safeInitialZoom;
+		ofSetLineWidth(std::max(1.0f, thickness * relativeZoom));
+
 		int style = pathLineStyle.get();
 		if (style == 1) {
 			float perimeter = currentPath->polyline.getPerimeter();
-			float scaledDash = 10.0f / zoom;
-			float scaledGap = 10.0f / zoom;
+			float scaledDash = 10.0f / safeInitialZoom;
+			float scaledGap = 10.0f / safeInitialZoom;
 			float step = scaledDash + scaledGap;
 			for (float len = 0; len < perimeter; len += step) {
 				float endLen = std::min(len + scaledDash, perimeter);
@@ -2758,8 +2882,8 @@ void ofApp::drawVisuals() {
 			}
 		} else if (style == 2) {
 			float perimeter = currentPath->polyline.getPerimeter();
-			float scaledDotSpacing = 8.0f / zoom;
-			float dotWorldRadius = (thickness * 0.5f) / zoom;
+			float scaledDotSpacing = 8.0f / safeInitialZoom;
+			float dotWorldRadius = (thickness * 0.5f) / safeInitialZoom;
 			ofPushStyle();
 			ofFill();
 			for (float len = 0; len < perimeter; len += scaledDotSpacing) {
@@ -2791,7 +2915,6 @@ void ofApp::drawVisuals() {
 			float screenW = screenH * aspect;
 			mc.player->draw(sx - screenW * 0.5f, sy - screenH * 0.5f, screenW, screenH);
 		}
-
 	}
 
 	// Update annotation font size if changed.
@@ -2807,22 +2930,36 @@ void ofApp::drawVisuals() {
 
 	// ---- Screen-space overlays for selected path ----
 	if (selectedPath) {
-		float sw = (float)ofGetWidth();
-		float sh = (float)ofGetHeight();
+		float rectW = gestureRectWidth.get();
+		float rectH = gestureRectHeight.get();
+		float rectOffset = gestureRectOffset.get();
+		float rectX = (float)ofGetWidth() - rectW - rectOffset;
+		float rectY = (float)ofGetHeight() - rectH - rectOffset;
+
+		// Draw faint rectangle background and border
+		ofPushStyle();
+		ofSetColor(0, 0, 0, 40); // Faint background (low alpha)
+		ofFill();
+		ofDrawRectangle(rectX, rectY, rectW, rectH);
+		ofSetColor(255, 255, 255, 80); // Faint border
+		ofNoFill();
+		ofSetLineWidth(1);
+		ofDrawRectangle(rectX, rectY, rectW, rectH);
+		ofPopStyle();
 
 		// Crosshair: X = position (0-1), Y = volume (0=bottom, 1=top)
-		// When ALT is held, use mouse position directly to avoid one-frame lag
+		// When ALT is held, use mouse position directly to avoid one-frame lag, clamped to the rect
 		float cx, cy;
-		if (ofGetKeyPressed(OF_KEY_ALT)) {
-			cx = (float)ofGetMouseX();
-			cy = (float)ofGetMouseY();
+		if (ofGetKeyPressed(OF_KEY_ALT) || inputManager.isAltDown) {
+			cx = ofClamp((float)ofGetMouseX(), rectX, rectX + rectW);
+			cy = ofClamp((float)ofGetMouseY(), rectY, rectY + rectH);
 		} else {
-			cx = selectedPath->position * sw;
+			cx = rectX + selectedPath->position * rectW;
 			// Use gesture volume when a gesture is active, otherwise static volume
 			float displayVol = (selectedPath->hasGesture && !selectedPath->gesturePoints.empty())
 				? selectedPath->getGestureVolume(selectedPath->position)
 				: selectedPath->volume;
-			cy = (1.0f - displayVol) * sh;
+			cy = rectY + (1.0f - displayVol) * rectH;
 		}
 		float crossSize = 10.0f;
 		ofColor phc = playheadColor.get();
@@ -2838,10 +2975,10 @@ void ofApp::drawVisuals() {
 			for (size_t i = 0; i + 1 < selectedPath->gesturePoints.size(); ++i) {
 				const auto & a = selectedPath->gesturePoints[i];
 				const auto & b = selectedPath->gesturePoints[i + 1];
-				float x0 = a.position * sw;
-				float y0 = (1.0f - a.volume) * sh;
-				float x1 = b.position * sw;
-				float y1 = (1.0f - b.volume) * sh;
+				float x0 = rectX + a.position * rectW;
+				float y0 = rectY + (1.0f - a.volume) * rectH;
+				float x1 = rectX + b.position * rectW;
+				float y1 = rectY + (1.0f - b.volume) * rectH;
 				int alpha = (int)(((a.volume * 135) + 120) * dataAlphaScale);
 				ofSetColor(100, 255, 150, alpha);
 				ofDrawLine(x0, y0, x1, y1);
@@ -2852,42 +2989,84 @@ void ofApp::drawVisuals() {
 
 	// Draw Text (Screen Space)
 	if (showText) {
-		ofColor fadedTextColor = textColor.get();
-		fadedTextColor.a = (int)(fadedTextColor.a * dataAlphaScale);
-		ofSetColor(fadedTextColor);
+		float safeInitialZoom = initialZoom > 0.0f ? initialZoom : 1.0f;
+		float textHeightWorld = basePointRadiusWorld * fontSize.get() * 0.24f;
+
 		if (font.isLoaded()) {
-			// Update font size if changed
-			static float lastFontSize = fontSize;
-			if (abs(lastFontSize - fontSize) > 0.5f) {
-				bool result = font.load("lmroman10-regular.otf", fontSize);
-				if (!result) font.load(OF_TTF_SANS, fontSize);
-				lastFontSize = fontSize;
-			}
+			// Font is loaded at a fixed high resolution (64px) to ensure crispness; we do not reload dynamically.
 
 			ofVec2f center(ofGetWidth() / 2, ofGetHeight() / 2);
-			for (const auto & p : points) {
+			for (int i = 0; i < (int)points.size(); ++i) {
+				const auto & p = points[i];
 				if (!p.text.empty()) {
 					// Calculate screen position: (world * zoom) + pan + center
 					ofVec2f screenPos = (ofVec2f(p.x, p.y) * zoom) + pan + center;
 
-					// Simple culling
-					if (screenPos.x > -100 && screenPos.x < ofGetWidth() + 100 && screenPos.y > -100 && screenPos.y < ofGetHeight() + 100) {
-
+					// Simple culling (slightly larger margin to account for scaled text)
+					if (screenPos.x > -300 && screenPos.x < ofGetWidth() + 300 && screenPos.y > -300 && screenPos.y < ofGetHeight() + 300) {
 						ofRectangle bounds = font.getStringBoundingBox(p.text, 0, 0);
-						// Draw with drop shadow for readability? optional.
-						font.drawString(p.text, screenPos.x - bounds.width / 2, screenPos.y - bounds.height / 2 + bounds.height);
+						float fontH = bounds.height > 0.0f ? bounds.height : fontSize.get();
+						float scaleFactor = (textHeightWorld * zoom) / fontH;
+
+						bool isHovered = hasHoveredPoint && (p.filename == hoveredPoint.filename);
+						bool isSelectedPoint = (selectedPointIdx == i) || (hasLastHoveredPoint && (p.filename == lastHoveredPoint.filename));
+						bool isAutoActive = (activePointFiles.find(p.filename) != activePointFiles.end());
+
+						ofColor drawColor = textColor.get();
+						if (isAutoActive) {
+							drawColor = activePointColor.get();
+						}
+						if (isSelectedPoint) {
+							drawColor = selectedColor.get();
+						}
+						if (isHovered) {
+							drawColor = hoveredColor.get();
+						}
+						drawColor.a = (int)(drawColor.a * dataAlphaScale);
+						ofSetColor(drawColor);
+
+						ofPushMatrix();
+						ofTranslate(screenPos.x, screenPos.y);
+						ofScale(scaleFactor, scaleFactor);
+						font.drawString(p.text, -bounds.width / 2, bounds.height / 2);
+						ofPopMatrix();
 					}
 				}
 			}
 		} else {
 			// Fallback Bitmap String
 			ofVec2f center(ofGetWidth() / 2, ofGetHeight() / 2);
-			for (const auto & p : points) {
+			for (int i = 0; i < (int)points.size(); ++i) {
+				const auto & p = points[i];
 				if (!p.text.empty()) {
 					ofVec2f screenPos = (ofVec2f(p.x, p.y) * zoom) + pan + center;
-					if (screenPos.x > -100 && screenPos.x < ofGetWidth() + 100 && screenPos.y > -100 && screenPos.y < ofGetHeight() + 100) {
+					if (screenPos.x > -300 && screenPos.x < ofGetWidth() + 300 && screenPos.y > -300 && screenPos.y < ofGetHeight() + 300) {
+						float fontH = 12.0f;
+						float scaleFactor = (textHeightWorld * zoom) / fontH;
+
+						bool isHovered = hasHoveredPoint && (p.filename == hoveredPoint.filename);
+						bool isSelectedPoint = (selectedPointIdx == i) || (hasLastHoveredPoint && (p.filename == lastHoveredPoint.filename));
+						bool isAutoActive = (activePointFiles.find(p.filename) != activePointFiles.end());
+
+						ofColor drawColor = textColor.get();
+						if (isAutoActive) {
+							drawColor = activePointColor.get();
+						}
+						if (isSelectedPoint) {
+							drawColor = selectedColor.get();
+						}
+						if (isHovered) {
+							drawColor = hoveredColor.get();
+						}
+						drawColor.a = (int)(drawColor.a * dataAlphaScale);
+						ofSetColor(drawColor);
+
+						ofPushMatrix();
+						ofTranslate(screenPos.x, screenPos.y);
+						ofScale(scaleFactor, scaleFactor);
 						float strWidth = p.text.length() * 8.0f;
-						ofDrawBitmapString(p.text, screenPos.x - strWidth / 2, screenPos.y + 4);
+						ofDrawBitmapString(p.text, -strWidth / 2, 4);
+						ofPopMatrix();
 					}
 				}
 			}
@@ -2991,70 +3170,80 @@ void ofApp::drawVisuals() {
 	} else {
 		ofDrawBitmapString("Zoom: " + ofToString(zoom), 20, 40);
 		ofDrawBitmapString("Paths: " + ofToString(paths.size()), 20, 60);
-	string dimStr = "NONE";
-	switch (currentThirdDimMode) {
-	case ThirdDimMode::INSTABILITY:
-		dimStr = "INSTABILITY";
-		break;
-	case ThirdDimMode::ATTACK:
-		dimStr = "ATTACK";
-		break;
-	case ThirdDimMode::BRIGHTNESS:
-		dimStr = "SPECTRAL CENTROID";
-		break;
-	default:
-		break;
-	}
-	ofDrawBitmapString("3D Dim: " + dimStr, 20, 80);
-	ofDrawBitmapString("Audio Mode: " + string(defaultPathMode == PathObject::LOOP_MODE ? "LOOP" : "ONCE"), 20, 100);
-	ofDrawBitmapString("Annotation Mode (Tab): " + string(annotationManager.isEnabled() ? "ON" : "OFF"), 20, 120);
-	ofDrawBitmapString("Point Glyph (5 cycle): " + pointGlyphModeName(pointGlyphMode), 20, 140);
-	ofDrawBitmapString("Spectrogram Layer (6): " + string(spectrogramLayerEnabled ? "ON" : "OFF"), 20, 160);
-	ofDrawBitmapString("Generate Missing Media (7): press to run", 20, 180);
-	ofDrawBitmapString("Spectrogram Blend (8): " + spectrogramBlendModeName(spectrogramBlendMode), 20, 200);
-	ofDrawBitmapString("Spectrogram Trail (GUI): N=" + ofToString(spectrogramTrailLength)
-		+ " layerA=" + ofToString(spectrogramLayerAlpha, 2)
-		+ " trailA=" + ofToString(spectrogramTrailAlpha, 2)
-		+ " luma=" + ofToString(spectrogramLumaKeyThreshold, 2), 20, 220);
-	ofDrawBitmapString("Audio Visual Feedback (9): " + string(audioVisualFeedbackEnabled.get() ? "ON" : "OFF")
-		+ " | Energy=" + ofToString(audioEnergy, 4)
-		+ " | Wobble=" + ofToString(audioPathWobbleAmount.get(), 2), 20, 240);
-	{
-		string nbStr = neighbourModeActive ? "ON" : "OFF";
-		if (neighbourModeActive && selectedPointIdx >= 0 && selectedPointIdx < (int)points.size()) {
-			nbStr += " | " + ofFilePath::getFileName(points[selectedPointIdx].filename);
+		string dimStr = "NONE";
+		switch (currentThirdDimMode) {
+		case ThirdDimMode::INSTABILITY:
+			dimStr = "INSTABILITY";
+			break;
+		case ThirdDimMode::ATTACK:
+			dimStr = "ATTACK";
+			break;
+		case ThirdDimMode::BRIGHTNESS:
+			dimStr = "SPECTRAL CENTROID";
+			break;
+		default:
+			break;
 		}
-		ofDrawBitmapString("Neighbour Mode (N): " + nbStr, 20, 260);
-	}
-	uint64_t nowMs = ofGetElapsedTimeMillis();
-	bool mediaPipeHasPackets = (mediaPipeLastPacketMs > 0)
-		&& ((nowMs - mediaPipeLastPacketMs) <= std::max<uint64_t>(mediaPipeTimeoutMs * 2, 1200));
-	std::string mediaPipeSourceLabel = "NONE";
-	if (mediaPipeSource == 1) mediaPipeSourceLabel = "HAND";
-	else if (mediaPipeSource == 2) mediaPipeSourceLabel = "FACE";
-	ofDrawBitmapString("MediaPipe Face (') : "
-		+ string(mediaPipeHandsEnabled
-			? (!mediaPipeHasPackets ? "ON NO OSC"
-				: (mediaPipeHandDetected ? "ON TRACKING" : "ON NO HAND"))
-				+ string(" | Src=") + mediaPipeSourceLabel
-				+ string(" | Ctrl=") + ofToString(mediaPipePinch, 2)
-				+ string(mediaPipePenDown ? " DOWN" : " UP")
-			: "OFF"),
-		20, 280);
-	int camPts = (isDrawingPath && currentPath) ? (int)currentPath->polyline.size() : 0;
-	string camHint = "Ready";
-	if (currentMode != DRAW_FREEHAND && !isDrawingPath) camHint = "Switch to f (Draw)";
-	else if (mediaPipeHandsEnabled) {
-		if (!mediaPipeHasPackets) camHint = "No OSC packets";
-		else if (mediaPipeSource == 1) camHint = mediaPipePenDown ? "Pointing finger draws" : "Point finger to draw";
-		else if (!mediaPipePenDown) camHint = "Open mouth to draw";
-		else if (!mediaPipeHandDetected) camHint = "No face tracked";
-	} else camHint = "Enable MediaPipe with '";
-	ofDrawBitmapString("Vision Draw State: "
-		+ string(isDrawingPath ? "DRAWING" : "IDLE")
-		+ " | Points=" + ofToString(camPts)
-		+ " | " + camHint,
-		20, 300);
+		ofDrawBitmapString("3D Dim: " + dimStr, 20, 80);
+		ofDrawBitmapString("Audio Mode: " + string(defaultPathMode == PathObject::LOOP_MODE ? "LOOP" : "ONCE"), 20, 100);
+		ofDrawBitmapString("Annotation Mode (Tab): " + string(annotationManager.isEnabled() ? "ON" : "OFF"), 20, 120);
+		ofDrawBitmapString("Point Glyph (5 cycle): " + pointGlyphModeName(pointGlyphMode), 20, 140);
+		ofDrawBitmapString("Spectrogram Layer (6): " + string(spectrogramLayerEnabled ? "ON" : "OFF"), 20, 160);
+		ofDrawBitmapString("Generate Missing Media (7): press to run", 20, 180);
+		ofDrawBitmapString("Spectrogram Blend (8): " + spectrogramBlendModeName(spectrogramBlendMode), 20, 200);
+		ofDrawBitmapString("Spectrogram Trail (GUI): N=" + ofToString(spectrogramTrailLength)
+				+ " layerA=" + ofToString(spectrogramLayerAlpha, 2)
+				+ " trailA=" + ofToString(spectrogramTrailAlpha, 2)
+				+ " luma=" + ofToString(spectrogramLumaKeyThreshold, 2),
+			20, 220);
+		ofDrawBitmapString("Audio Visual Feedback (9): " + string(audioVisualFeedbackEnabled.get() ? "ON" : "OFF")
+				+ " | Energy=" + ofToString(audioEnergy, 4)
+				+ " | Wobble=" + ofToString(audioPathWobbleAmount.get(), 2),
+			20, 240);
+		{
+			string nbStr = neighbourModeActive ? "ON" : "OFF";
+			if (neighbourModeActive && selectedPointIdx >= 0 && selectedPointIdx < (int)points.size()) {
+				nbStr += " | " + ofFilePath::getFileName(points[selectedPointIdx].filename);
+			}
+			ofDrawBitmapString("Neighbour Mode (N): " + nbStr, 20, 260);
+		}
+		uint64_t nowMs = ofGetElapsedTimeMillis();
+		bool mediaPipeHasPackets = (mediaPipeLastPacketMs > 0)
+			&& ((nowMs - mediaPipeLastPacketMs) <= std::max<uint64_t>(mediaPipeTimeoutMs * 2, 1200));
+		std::string mediaPipeSourceLabel = "NONE";
+		if (mediaPipeSource == 1)
+			mediaPipeSourceLabel = "HAND";
+		else if (mediaPipeSource == 2)
+			mediaPipeSourceLabel = "FACE";
+		ofDrawBitmapString("MediaPipe Face (') : "
+				+ string(mediaPipeHandsEnabled
+						? (!mediaPipeHasPackets ? "ON NO OSC"
+												: (mediaPipeHandDetected ? "ON TRACKING" : "ON NO HAND"))
+							+ string(" | Src=") + mediaPipeSourceLabel
+							+ string(" | Ctrl=") + ofToString(mediaPipePinch, 2)
+							+ string(mediaPipePenDown ? " DOWN" : " UP")
+						: "OFF"),
+			20, 280);
+		int camPts = (isDrawingPath && currentPath) ? (int)currentPath->polyline.size() : 0;
+		string camHint = "Ready";
+		if (currentMode != DRAW_FREEHAND && !isDrawingPath)
+			camHint = "Switch to f (Draw)";
+		else if (mediaPipeHandsEnabled) {
+			if (!mediaPipeHasPackets)
+				camHint = "No OSC packets";
+			else if (mediaPipeSource == 1)
+				camHint = mediaPipePenDown ? "Pointing finger draws" : "Point finger to draw";
+			else if (!mediaPipePenDown)
+				camHint = "Open mouth to draw";
+			else if (!mediaPipeHandDetected)
+				camHint = "No face tracked";
+		} else
+			camHint = "Enable MediaPipe with '";
+		ofDrawBitmapString("Vision Draw State: "
+				+ string(isDrawingPath ? "DRAWING" : "IDLE")
+				+ " | Points=" + ofToString(camPts)
+				+ " | " + camHint,
+			20, 300);
 	}
 
 	if (!minimalStatus) {
@@ -3062,12 +3251,25 @@ void ofApp::drawVisuals() {
 		if (selectedPath) {
 			ofDrawBitmapString("Selected: " + selectedPath->name + " - Video: " + (selectedPath->sendToVideo ? "ON" : "OFF"), 20, textY);
 			textY += 20;
+			ofDrawBitmapString("  Rest Duration ({/}): " + ofToString(selectedPath->restDuration, 2) + "s", 20, textY);
+			textY += 20;
 		}
 
 		ofDrawBitmapString("Video Mode (m): " + ofToString(showVideo ? "ON" : "OFF"), 20, textY);
 		textY += 20;
 		ofDrawBitmapString("Video Trigger (;): " + string(videoTriggerLocked ? "LOCKED" : "UNLOCKED"), 20, textY);
 		textY += 20;
+		ofDrawBitmapString("Image Mode (.): " + ofToString(showImage ? "ON" : "OFF"), 20, textY);
+		textY += 20;
+		if (showImage) {
+			if (!imagePaths.empty()) {
+				int idx = std::clamp(currentImageIndex.get(), 0, (int)imagePaths.size() - 1);
+				ofDrawBitmapString("Loaded Image [" + ofToString(idx + 1) + "/" + ofToString(imagePaths.size()) + "]: " + ofFilePath::getFileName(imagePaths[idx]), 20, textY);
+			} else {
+				ofDrawBitmapString("Loaded Image: (No images found in 'images/')", 20, textY);
+			}
+			textY += 20;
+		}
 		if (showVideo) {
 			ofDrawBitmapString("Media Root: " + mediaRoot, 20, textY);
 			textY += 20;
@@ -3091,9 +3293,37 @@ void ofApp::drawVisuals() {
 	// Draw OSC Debug
 	// Draw OSC Debug
 	if (showDebug) {
-		oscManager.drawDebug(ofGetWidth() - 400, 20);
+		std::vector<std::string> playingFiles;
+		for (const auto & path : paths) {
+			for (const auto & p : path->playingPoints) {
+				playingFiles.push_back(p.filename);
+			}
+		}
+		if (hasLastHoveredPoint) {
+			playingFiles.push_back(lastHoveredPoint.filename);
+		}
+		std::sort(playingFiles.begin(), playingFiles.end());
+		playingFiles.erase(std::unique(playingFiles.begin(), playingFiles.end()), playingFiles.end());
+
+		int debugX = ofGetWidth() - 400;
+		int debugY = 40;
+		ofDrawBitmapString("=== DATASET FILES ===", debugX, debugY);
+		debugY += 20;
+		if (playingFiles.empty()) {
+			ofDrawBitmapString("(None)", debugX, debugY);
+		} else {
+			for (const auto & fn : playingFiles) {
+				ofDrawBitmapString(fn, debugX, debugY);
+				debugY += 16;
+				if (debugY > ofGetHeight() - 60) {
+					ofDrawBitmapString("... and others", debugX, debugY);
+					break;
+				}
+			}
+		}
+
 		// helper text
-		ofDrawBitmapString("Keys: Space(Play) f(Draw) n(Nav) m(Video) d(Debug) ,(Settings)", 20, ofGetHeight() - 30);
+		ofDrawBitmapString("Keys: Space(Play) f(Draw) n(Nav) m(Video) d(Debug) ,(Settings) .(Image)", 20, ofGetHeight() - 30);
 	}
 
 	// Help Overlay — drawn last, on top of everything
@@ -3167,6 +3397,8 @@ void ofApp::drawVisuals() {
 		ly += lineH;
 		ofDrawBitmapString("  m       Toggle video view", lx, ly);
 		ly += lineH;
+		ofDrawBitmapString("  .       Toggle still image view", lx, ly);
+		ly += lineH;
 		ofDrawBitmapString("  Shift+m Toggle video triggering on selected path", lx, ly);
 		ly += lineH;
 		ofDrawBitmapString("  ;       Lock/Unlock new video triggers", lx, ly);
@@ -3224,18 +3456,18 @@ void ofApp::drawVisuals() {
 		float mouseX = ofGetMouseX();
 		float mouseY = ofGetMouseY();
 		float crosshairSize = 12.0f; // Half-length of crosshair arms
-		
+
 		ofSetColor(255, 255, 255, 200); // White with slight transparency
 		ofSetLineWidth(2.0f);
 		ofNoFill();
-		
+
 		// Draw a + (plus) crosshair
 		ofDrawLine(mouseX - crosshairSize, mouseY, mouseX + crosshairSize, mouseY); // Horizontal
 		ofDrawLine(mouseX, mouseY - crosshairSize, mouseX, mouseY + crosshairSize); // Vertical
-		
+
 		// Optional: draw a small circle around the center
 		ofDrawCircle(mouseX, mouseY, 4.0f);
-		
+
 		ofSetLineWidth(1.0f); // Reset
 	}
 
@@ -3466,13 +3698,13 @@ void ofApp::keyPressed(int key) {
 		spectrogramBlendMode = nextSpectrogramBlendMode(spectrogramBlendMode);
 		spectrogramBlendMode_param = (int)spectrogramBlendMode;
 		ofLogNotice("ofApp") << "Spectrogram Blend Mode: "
-			<< spectrogramBlendModeName(spectrogramBlendMode);
+							 << spectrogramBlendModeName(spectrogramBlendMode);
 		return;
 	}
 	if (key == '9' || key == '(') {
 		audioVisualFeedbackEnabled = !audioVisualFeedbackEnabled.get();
 		ofLogNotice("ofApp") << "Audio Visual Feedback: "
-			<< (audioVisualFeedbackEnabled.get() ? "ON" : "OFF");
+							 << (audioVisualFeedbackEnabled.get() ? "ON" : "OFF");
 		return;
 	}
 
@@ -3501,10 +3733,17 @@ void ofApp::keyPressed(int key) {
 		break;
 
 	case CMD_TOGGLE_PLAYBACK: // Spacebar
-		if (selectedPath) {
-			selectedPath->togglePlayback();
-			if (!selectedPath->isActive) {
-				stopPathSamples(selectedPath);
+		if (ofGetKeyPressed(OF_KEY_SHIFT)) { // stop all
+			for (auto & p : paths) {
+				p->isActive = false;
+				stopPathSamples(p);
+			}
+		} else {
+			if (selectedPath) { // toggle the selected path
+				selectedPath->togglePlayback();
+				if (!selectedPath->isActive) {
+					stopPathSamples(selectedPath);
+				}
 			}
 		}
 		break;
@@ -3557,6 +3796,12 @@ void ofApp::keyPressed(int key) {
 		if (!showVideo) videoFront->stop();
 		break;
 
+	case CMD_TOGGLE_IMAGE:
+		if (key == '.') {
+			showImage = !showImage;
+		}
+		break;
+
 	case CMD_TOGGLE_FULLSCREEN_PROJECTOR:
 		if (projectorWindow) {
 			// Check if the window is actually still open and valid
@@ -3607,6 +3852,20 @@ void ofApp::keyPressed(int key) {
 		if (selectedPath) {
 			selectedPath->jitterMode = !selectedPath->jitterMode;
 			ofLogNotice("ofApp") << "Jitter mode for path " << selectedPath->name << " set to: " << (selectedPath->jitterMode ? "ON" : "OFF");
+		}
+		break;
+
+	case CMD_INCREASE_REST_DURATION:
+		if (selectedPath) {
+			selectedPath->restDuration += 0.1f;
+			ofLogNotice("ofApp") << "Rest duration for path " << selectedPath->name << " increased to: " << selectedPath->restDuration << "s";
+		}
+		break;
+
+	case CMD_DECREASE_REST_DURATION:
+		if (selectedPath) {
+			selectedPath->restDuration = std::max(0.0f, selectedPath->restDuration - 0.1f);
+			ofLogNotice("ofApp") << "Rest duration for path " << selectedPath->name << " decreased to: " << selectedPath->restDuration << "s";
 		}
 		break;
 
@@ -3679,6 +3938,10 @@ void ofApp::keyPressed(int key) {
 		}
 		break;
 
+	case CMD_SPREAD_POINTS:
+		spreadPointsApart();
+		break;
+
 	case CMD_CLUSTER_PREV:
 		if (!sortedClusterIds.empty()) {
 			if (activeClusterId == -999) {
@@ -3693,7 +3956,8 @@ void ofApp::keyPressed(int key) {
 				}
 			}
 			std::string label = (clusters.count(activeClusterId) && !clusters[activeClusterId].label.empty())
-				? clusters[activeClusterId].label : "id " + ofToString(activeClusterId);
+				? clusters[activeClusterId].label
+				: "id " + ofToString(activeClusterId);
 			ofLogNotice("ofApp") << "Cluster filter: " << label;
 		}
 		break;
@@ -3712,7 +3976,8 @@ void ofApp::keyPressed(int key) {
 				}
 			}
 			std::string label = (clusters.count(activeClusterId) && !clusters[activeClusterId].label.empty())
-				? clusters[activeClusterId].label : "id " + ofToString(activeClusterId);
+				? clusters[activeClusterId].label
+				: "id " + ofToString(activeClusterId);
 			ofLogNotice("ofApp") << "Cluster filter: " << label;
 		}
 		break;
@@ -3746,7 +4011,7 @@ void ofApp::keyPressed(int key) {
 			std::vector<std::pair<float, int>> distIdx;
 			distIdx.reserve(numN);
 			for (int ni = 0; ni < numN; ++ni) {
-				distIdx.push_back({sel.true_distances[ni], sel.true_neighbors[ni]});
+				distIdx.push_back({ sel.true_distances[ni], sel.true_neighbors[ni] });
 			}
 			std::sort(distIdx.begin(), distIdx.end());
 			neighbourQueue.clear();
@@ -3995,7 +4260,7 @@ void ofApp::keyPressed(int key) {
 					if (diag > 0.0f) {
 						float tStep = 0.01f;
 
-						if (key == OF_KEY_LEFT || key == OF_KEY_RIGHT) {
+						if (key == OF_KEY_UP || key == OF_KEY_DOWN) {
 							float minRadius = std::max(diag * 0.001f, 0.001f);
 							float maxRadius = std::max(minRadius, diag * 0.5f);
 							float ratio = maxRadius / minRadius;
@@ -4003,7 +4268,7 @@ void ofApp::keyPressed(int key) {
 							if (ratio > 1.0f) {
 								float radiusClamped = std::clamp(targetPath->radius, minRadius, maxRadius);
 								float t = std::log(radiusClamped / minRadius) / std::log(ratio);
-								t += (key == OF_KEY_RIGHT) ? tStep : -tStep;
+								t += (key == OF_KEY_UP) ? tStep : -tStep;
 								t = std::clamp(t, 0.0f, 1.0f);
 								targetPath->radius = minRadius * std::pow(ratio, t);
 							} else {
@@ -4011,15 +4276,15 @@ void ofApp::keyPressed(int key) {
 							}
 						}
 
-						if (key == OF_KEY_UP || key == OF_KEY_DOWN) {
-							float minSpeed = std::max(diag * 0.00005f, 0.0001f);
+						if (key == OF_KEY_LEFT || key == OF_KEY_RIGHT) {
+							float minSpeed = std::max(diag * 0.000005f, 0.00001f);
 							float maxSpeed = std::max(minSpeed, diag * 0.25f);
 							float ratio = maxSpeed / minSpeed;
 
 							if (ratio > 1.0f) {
 								float speedClamped = std::clamp(targetPath->speed, minSpeed, maxSpeed);
 								float t = std::log(speedClamped / minSpeed) / std::log(ratio);
-								t += (key == OF_KEY_UP) ? tStep : -tStep;
+								t += (key == OF_KEY_RIGHT) ? tStep : -tStep;
 								t = std::clamp(t, 0.0f, 1.0f);
 								targetPath->speed = minSpeed * std::pow(ratio, t);
 							} else {
@@ -4137,6 +4402,23 @@ void ofApp::mousePressed(int x, int y, int button) {
 		return;
 	}
 
+	// Alt+click in any mode: start gesture recording on selected path (if inside gesture pad)
+	if ((ofGetKeyPressed(OF_KEY_ALT) || inputManager.isAltDown) && selectedPath) {
+		float rectW = gestureRectWidth.get();
+		float rectH = gestureRectHeight.get();
+		float rectOffset = gestureRectOffset.get();
+		float rectX = (float)ofGetWidth() - rectW - rectOffset;
+		float rectY = (float)ofGetHeight() - rectH - rectOffset;
+
+		if ((float)x >= rectX && (float)x <= rectX + rectW && (float)y >= rectY && (float)y <= rectY + rectH) {
+			selectedPath->gesturePoints.clear();
+			selectedPath->hasGesture = false;
+			selectedPath->gestureStartTime = ofGetElapsedTimeMillis();
+			isRecordingGesture = true;
+			return;
+		}
+	}
+
 	ofVec2f worldPos = screenToWorld(x, y);
 
 	if (currentMode == DRAW_FREEHAND) {
@@ -4146,15 +4428,6 @@ void ofApp::mousePressed(int x, int y, int button) {
 			isDrawingPath = true;
 		}
 		currentPath->addPoint(worldPos);
-	} else {
-		// Alt+click in any mode: start gesture recording on selected path
-		if (ofGetKeyPressed(OF_KEY_ALT) && selectedPath) {
-			selectedPath->gesturePoints.clear();
-			selectedPath->hasGesture = false;
-			selectedPath->gestureStartTime = ofGetElapsedTimeMillis();
-			isRecordingGesture = true;
-			return;
-		}
 	}
 
 	if (currentMode == NAVIGATE) {
@@ -4188,8 +4461,36 @@ void ofApp::mousePressed(int x, int y, int button) {
 				p->isSelected = (p == selectedPath);
 		}
 	} else if (currentMode == BROWSE) {
-		// In BROWSE, click near a path to select+drag it
-		if (!ofGetKeyPressed(OF_KEY_ALT)) {
+		// In BROWSE, click near a path to select+drag/reshape it
+		if (ofGetKeyPressed(OF_KEY_SHIFT)) {
+			float minDist = 20.0f / zoom;
+			std::shared_ptr<PathObject> clickedPath = nullptr;
+			for (auto & p : paths) {
+				float d = p->getDistanceToPoint(worldPos);
+				if (d < minDist) {
+					minDist = d;
+					clickedPath = p;
+				}
+			}
+			if (clickedPath) {
+				int closestIdx = -1;
+				float closestCtrlDist = 20.0f / zoom;
+				for (size_t i = 0; i < clickedPath->controlPoints.size(); ++i) {
+					float d = clickedPath->controlPoints[i].distance(worldPos);
+					if (d < closestCtrlDist) {
+						closestCtrlDist = d;
+						closestIdx = (int)i;
+					}
+				}
+				if (closestIdx != -1) {
+					selectedPath = clickedPath;
+					for (auto & p : paths)
+						p->isSelected = (p == selectedPath);
+					isDraggingControlPoint = true;
+					draggedControlPointIdx = closestIdx;
+				}
+			}
+		} else if (!ofGetKeyPressed(OF_KEY_ALT) && !inputManager.isAltDown) {
 			float minDist = 20.0f / zoom;
 			std::shared_ptr<PathObject> clickedPath = nullptr;
 			for (auto & p : paths) {
@@ -4220,7 +4521,7 @@ void ofApp::mousePressed(int x, int y, int button) {
 				}
 			}
 			if (nearest != nullptr) {
-				auto path = createWanderingPath(*nearest, 50, 0.5f, 3);
+				auto path = createWanderingPath(*nearest, wanderPathSteps.get(), 0.5f, 3);
 				oscManager.sendUIPathAdd(path->name);
 				paths.push_back(path);
 				// Auto-select
@@ -4243,7 +4544,7 @@ void ofApp::mousePressed(int x, int y, int button) {
 void ofApp::mouseDragged(int x, int y, int button) {
 	// Forward to annotation system
 	if (annotationManager.onMouseDragged(glm::vec2(x, y),
-	    glm::vec2(x - lastMouse.x, y - lastMouse.y))) {
+			glm::vec2(x - lastMouse.x, y - lastMouse.y))) {
 		lastMouse.set(x, y);
 		return;
 	}
@@ -4303,12 +4604,25 @@ void ofApp::mouseDragged(int x, int y, int button) {
 	}
 
 	// Allow gesture recording even in BROWSE mode (before the early return)
-	if (ofGetKeyPressed(OF_KEY_ALT) && selectedPath && isRecordingGesture) {
-		float scrubPos = std::clamp((float)x / (float)ofGetWidth(), 0.0f, 1.0f);
-		float vol = std::clamp(ofMap((float)y, (float)ofGetHeight(), 0.f, 0.f, 1.f), 0.f, 1.f);
+	if ((ofGetKeyPressed(OF_KEY_ALT) || inputManager.isAltDown) && selectedPath && isRecordingGesture) {
+		float rectW = gestureRectWidth.get();
+		float rectH = gestureRectHeight.get();
+		float rectOffset = gestureRectOffset.get();
+		float rectX = (float)ofGetWidth() - rectW - rectOffset;
+		float rectY = (float)ofGetHeight() - rectH - rectOffset;
+
+		float scrubPos = std::clamp(((float)x - rectX) / rectW, 0.0f, 1.0f);
+		float vol = std::clamp(ofMap((float)y, rectY + rectH, rectY, 0.f, 1.f), 0.f, 1.f);
 		long timeMs = ofGetElapsedTimeMillis() - selectedPath->gestureStartTime;
 		selectedPath->gesturePoints.push_back({ scrubPos, vol, timeMs });
 		selectedPath->position = scrubPos; // live preview during record
+		return;
+	}
+	// Reshaping control point in BROWSE mode
+	if (currentMode == BROWSE && isDraggingControlPoint && selectedPath && draggedControlPointIdx >= 0 && draggedControlPointIdx < (int)selectedPath->controlPoints.size()) {
+		ofVec2f worldPos = screenToWorld(x, y);
+		selectedPath->controlPoints[draggedControlPointIdx] = worldPos;
+		selectedPath->finalize();
 		return;
 	}
 	// Path dragging in BROWSE mode
@@ -4324,22 +4638,28 @@ void ofApp::mouseDragged(int x, int y, int button) {
 	ofVec2f worldPos = screenToWorld(x, y);
 
 	// Alt/Option: gesture recording (if started) or scrubbing
-	if (ofGetKeyPressed(OF_KEY_ALT) && selectedPath) {
-		float scrubPos = std::clamp((float)x / (float)ofGetWidth(), 0.0f, 1.0f);
+	if ((ofGetKeyPressed(OF_KEY_ALT) || inputManager.isAltDown) && selectedPath) {
+		float rectW = gestureRectWidth.get();
+		float rectH = gestureRectHeight.get();
+		float rectOffset = gestureRectOffset.get();
+		float rectX = (float)ofGetWidth() - rectW - rectOffset;
+		float rectY = (float)ofGetHeight() - rectH - rectOffset;
+
+		float scrubPos = std::clamp(((float)x - rectX) / rectW, 0.0f, 1.0f);
 		selectedPath->position = scrubPos;
 
 		// Sequential path: also advance the step index
 		if (selectedPath->isSequential && !selectedPath->sequentialPoints.empty()) {
 			int maxIdx = (int)selectedPath->sequentialPoints.size() - 1;
 			selectedPath->currentStepIndex = (int)std::clamp(
-				ofMap((float)x, 0.f, (float)ofGetWidth(),
+				ofMap((float)x, rectX, rectX + rectW,
 					0.f, (float)maxIdx),
 				0.f, (float)maxIdx);
 		}
 
 		// Y axis → volume (bottom=0, top=1)
 		float vol = std::clamp(
-			ofMap((float)y, (float)ofGetHeight(), 0.f, 0.f, 1.f), 0.f, 1.f);
+			ofMap((float)y, rectY + rectH, rectY, 0.f, 1.f), 0.f, 1.f);
 
 		if (isRecordingGesture) {
 			// Accumulate gesture point
@@ -4382,6 +4702,8 @@ void ofApp::mouseReleased(int x, int y, int button) {
 
 	// Stop path dragging
 	isDraggingPath = false;
+	isDraggingControlPoint = false;
+	draggedControlPointIdx = -1;
 
 	// Commit gesture recording if active
 	if (isRecordingGesture && selectedPath) {
@@ -4453,29 +4775,37 @@ void ofApp::mouseReleased(int x, int y, int button) {
 
 void ofApp::mouseMoved(int x, int y) {
 	// Alt/Option scrub — works when key is held (no mouse button needed)
-	if (ofGetKeyPressed(OF_KEY_ALT) && selectedPath) {
+	if ((ofGetKeyPressed(OF_KEY_ALT) || inputManager.isAltDown) && selectedPath) {
+		float rectW = gestureRectWidth.get();
+		float rectH = gestureRectHeight.get();
+		float rectOffset = gestureRectOffset.get();
+		float rectX = (float)ofGetWidth() - rectW - rectOffset;
+		float rectY = (float)ofGetHeight() - rectH - rectOffset;
+
+		float scrubPos = std::clamp(((float)x - rectX) / rectW, 0.0f, 1.0f);
+
 		if (selectedPath->stepMode && selectedPath->isSequential
 			&& !selectedPath->sequentialPoints.empty()) {
 			// Snap to discrete step
 			int n = (int)selectedPath->sequentialPoints.size();
 			int stepIdx = (int)std::clamp(
-				ofMap((float)x, 0.f, (float)ofGetWidth(), 0.f, (float)(n - 1)),
+				ofMap((float)x, rectX, rectX + rectW, 0.f, (float)(n - 1)),
 				0.f, (float)(n - 1));
 			selectedPath->currentStepIndex = stepIdx;
 			selectedPath->position = (n > 1) ? (float)stepIdx / (float)(n - 1) : 0.0f;
 		} else {
-			selectedPath->position = std::clamp((float)x / (float)ofGetWidth(), 0.0f, 1.0f);
+			selectedPath->position = scrubPos;
 			if (selectedPath->isSequential && !selectedPath->sequentialPoints.empty()) {
 				int maxIdx = (int)selectedPath->sequentialPoints.size() - 1;
 				selectedPath->currentStepIndex = (int)std::clamp(
-					ofMap((float)x, 0.f, (float)ofGetWidth(), 0.f, (float)maxIdx),
+					ofMap((float)x, rectX, rectX + rectW, 0.f, (float)maxIdx),
 					0.f, (float)maxIdx);
 			}
 		}
 		// Y axis → volume (bottom=0, top=1) — always
 		float prevVol = selectedPath->volume;
 		selectedPath->volume = std::clamp(
-			ofMap((float)y, (float)ofGetHeight(), 0.f, 0.f, 1.f), 0.f, 1.f);
+			ofMap((float)y, rectY + rectH, rectY, 0.f, 1.f), 0.f, 1.f);
 		if (selectedPath->volume != prevVol) {
 			oscManager.sendPathVolume(selectedPath->name, selectedPath->volume);
 			oscManager.sendUIPathUpdate(selectedPath->id, selectedPath->isActive,
@@ -4659,10 +4989,12 @@ void ofApp::zoomToDataExtents(bool animate, bool includeAnnotations) {
 		if (dataWidth <= 0) dataWidth = 1000;
 		if (dataHeight <= 0) dataHeight = 1000;
 		float newZoom = std::min(ofGetWidth() / dataWidth, ofGetHeight() / dataHeight);
+		initialZoom = newZoom;
 		float centerX = (minX + maxX) / 2.0f;
 		float centerY = (minY + maxY) / 2.0f;
 		setViewTarget(newZoom, ofVec2f(-centerX * newZoom, -centerY * newZoom), animate);
 	} else {
+		initialZoom = 1.0f;
 		setViewTarget(1.0f, ofVec2f(0, 0), animate);
 	}
 }
@@ -4873,6 +5205,7 @@ bool ofApp::loadPoints(string jsonPath, bool loadGlobalAnnotations) {
 			// pan = -(centerWorld * zoom)
 
 			ofVec2f newPan(-centerX * newZoom, -centerY * newZoom);
+			initialZoom = newZoom;
 			setViewTarget(newZoom, newPan, false);
 
 			ofLogNotice("ofApp::loadPoints") << "Auto-framed. Target zoom: " << newZoom << " Target pan: " << newPan;
@@ -4925,6 +5258,8 @@ bool ofApp::loadPoints(string jsonPath, bool loadGlobalAnnotations) {
 		// Final safety pass: ensure every loaded/generated annotation label is
 		// fully inside the current point bounds.
 		annotationManager.clampAllLabelsToPointsBounds(points);
+
+		scanImagesDirectory();
 
 		return true;
 	} else {
@@ -5127,6 +5462,8 @@ void ofApp::saveComposition(string filepath) {
 	root["settings"]["zoom"] = zoom;
 	root["settings"]["pan_x"] = pan.x;
 	root["settings"]["pan_y"] = pan.y;
+	root["settings"]["show_image"] = showImage;
+	root["settings"]["image_index"] = currentImageIndex.get();
 
 	// 3. Paths
 	ofxJSONElement pathsArray;
@@ -5145,6 +5482,7 @@ void ofApp::saveComposition(string filepath) {
 		pathJson["is_sequential"] = p->isSequential;
 		pathJson["is_wander"] = p->isWander;
 		pathJson["send_video"] = p->sendToVideo;
+		pathJson["rest_duration"] = p->restDuration;
 
 		// Save control points (the actual drawn/generated vertices)
 		ofxJSONElement cpArray;
@@ -5202,16 +5540,16 @@ void ofApp::saveComposition(string filepath) {
 	for (int i = 0; i < (int)annotationManager.getAnnotations().size(); ++i) {
 		const auto & a = annotationManager.getAnnotations()[i];
 		ofxJSONElement obj;
-		obj["id"]               = a.id;
-		obj["anchor_x"]         = a.anchorPoint.x;
-		obj["anchor_y"]         = a.anchorPoint.y;
-		obj["nearest_idx"]      = a.nearestPointIdx;
-		obj["label_x"]          = a.labelBoxPos.x;
-		obj["label_y"]          = a.labelBoxPos.y;
-		obj["label_is_world"]   = true;
-		obj["label_text"]       = a.labelText;
-		obj["is_cluster"]       = a.isClusterAnnotation;
-		obj["cluster_id"]       = a.clusterId;
+		obj["id"] = a.id;
+		obj["anchor_x"] = a.anchorPoint.x;
+		obj["anchor_y"] = a.anchorPoint.y;
+		obj["nearest_idx"] = a.nearestPointIdx;
+		obj["label_x"] = a.labelBoxPos.x;
+		obj["label_y"] = a.labelBoxPos.y;
+		obj["label_is_world"] = true;
+		obj["label_text"] = a.labelText;
+		obj["is_cluster"] = a.isClusterAnnotation;
+		obj["cluster_id"] = a.clusterId;
 		annotArray.append(obj);
 	}
 	root["annotations"] = annotArray;
@@ -5220,7 +5558,7 @@ void ofApp::saveComposition(string filepath) {
 	bool success = root.save(filepath, true);
 	if (success) {
 		ofLogNotice("ofApp::saveComposition") << "Successfully saved composition to " << filepath
-			<< " (with " << annotationManager.getAnnotations().size() << " annotations)";
+											  << " (with " << annotationManager.getAnnotations().size() << " annotations)";
 	} else {
 		ofLogError("ofApp::saveComposition") << "Failed to save composition to " << filepath;
 	}
@@ -5256,6 +5594,8 @@ void ofApp::loadCompositionOrPoints(string filepath) {
 			}
 		}
 
+		lastLoadedCompositionPath = filepath;
+
 		if (!loadPoints(targetPointsFile, false)) {
 			// If loadPoints fails (e.g. wrong file type), abort composition load
 			ofLogError("ofApp::loadCompositionOrPoints") << "Failed to load points data. Aborting composition load.";
@@ -5268,6 +5608,15 @@ void ofApp::loadCompositionOrPoints(string filepath) {
 			showTitle = true; // Auto-show if loaded? (Can keep it optional, let's auto-show if it exists and is not empty)
 			if (compositionTitle.empty()) showTitle = false;
 		}
+
+		// Restore settings
+		if (root.isMember("settings")) {
+			const ofxJSONElement & settings = root["settings"];
+			if (settings.isMember("show_image")) showImage = settings["show_image"].asBool();
+			if (settings.isMember("image_index")) currentImageIndex = settings["image_index"].asInt();
+		}
+
+		scanImagesDirectory();
 
 		// 2. Clear existing paths and selection
 		paths.clear();
@@ -5309,6 +5658,7 @@ void ofApp::loadCompositionOrPoints(string filepath) {
 				if (pJson.isMember("is_sequential")) newPath->isSequential = pJson["is_sequential"].asBool();
 				if (pJson.isMember("is_wander")) newPath->isWander = pJson["is_wander"].asBool();
 				if (pJson.isMember("send_video")) newPath->sendToVideo = pJson["send_video"].asBool();
+				if (pJson.isMember("rest_duration")) newPath->restDuration = pJson["rest_duration"].asFloat();
 
 				// Reconstruct control points
 				if (pJson.isMember("control_points") && pJson["control_points"].isArray()) {
@@ -5372,8 +5722,8 @@ void ofApp::loadCompositionOrPoints(string filepath) {
 		// 5. Load annotations from composition JSON (not from global file)
 		if (root.isMember("annotations") && root["annotations"].isArray()) {
 			annotationManager.loadFromJSON(root["annotations"], points);
-			ofLogNotice("ofApp::loadCompositionOrPoints") << "Loaded " 
-				<< annotationManager.getAnnotations().size() << " annotations from composition.";
+			ofLogNotice("ofApp::loadCompositionOrPoints") << "Loaded "
+														  << annotationManager.getAnnotations().size() << " annotations from composition.";
 		} else {
 			// No annotations in composition; start with empty
 			annotationManager.clearAnnotations();
@@ -5392,7 +5742,242 @@ void ofApp::loadCompositionOrPoints(string filepath) {
 		ofLogNotice("ofApp::loadCompositionOrPoints") << "Composition loaded successfully!";
 	} else {
 		// 2. Otherwise, treat it as a standard raw points file
+		lastLoadedCompositionPath = "";
 		ofLogNotice("ofApp::loadCompositionOrPoints") << "No composition metadata found; treating as raw points file.";
 		loadPoints(filepath, true);
 	}
+}
+
+//--------------------------------------------------------------
+void ofApp::scanImagesDirectory() {
+	imagePaths.clear();
+	std::string baseDir = "";
+	if (!lastLoadedCompositionPath.empty()) {
+		baseDir = ofFile(lastLoadedCompositionPath).getEnclosingDirectory();
+	} else if (!lastLoadedPointsPath.empty()) {
+		baseDir = ofFile(lastLoadedPointsPath).getEnclosingDirectory();
+	}
+
+	if (!baseDir.empty()) {
+		if (baseDir.back() != '/') baseDir += "/";
+		std::string imagesDir = baseDir + "images/";
+		ofDirectory dir(imagesDir);
+		if (dir.exists()) {
+			dir.allowExt("jpg");
+			dir.allowExt("jpeg");
+			dir.allowExt("png");
+			dir.allowExt("gif");
+			dir.allowExt("bmp");
+			dir.allowExt("tga");
+			dir.allowExt("tiff");
+			dir.allowExt("tif");
+			dir.allowExt("JPG");
+			dir.allowExt("JPEG");
+			dir.allowExt("PNG");
+			dir.allowExt("GIF");
+			dir.allowExt("BMP");
+			dir.allowExt("TGA");
+			dir.allowExt("TIFF");
+			dir.allowExt("TIF");
+			dir.listDir();
+			for (auto & file : dir.getFiles()) {
+				if (file.isFile()) {
+					imagePaths.push_back(file.getAbsolutePath());
+				}
+			}
+			std::sort(imagePaths.begin(), imagePaths.end());
+		}
+	}
+
+	int numImages = (int)imagePaths.size();
+	currentImageIndex.setMin(0);
+	currentImageIndex.setMax(std::max(0, numImages - 1));
+	int currentVal = currentImageIndex.get();
+	if (currentVal >= numImages) {
+		currentImageIndex = std::max(0, numImages - 1);
+	}
+
+	loadedImagePath = "";
+	updateCurrentImage();
+}
+
+//--------------------------------------------------------------
+void ofApp::updateCurrentImage() {
+	if (showImage && !imagePaths.empty()) {
+		int idx = std::clamp(currentImageIndex.get(), 0, (int)imagePaths.size() - 1);
+		std::string targetPath = imagePaths[idx];
+		if (loadedImagePath != targetPath) {
+			currentImage.load(targetPath);
+			loadedImagePath = targetPath;
+			ofLogNotice("ofApp") << "Loaded still image: " << targetPath;
+		}
+	}
+}
+
+//--------------------------------------------------------------
+void ofApp::drawStillImageIfActive() {
+	if (showImage && currentImage.isAllocated() && currentImage.getWidth() > 0) {
+		ofSetColor(255, 255, 255, 255);
+		float iw = currentImage.getWidth(), ih = currentImage.getHeight();
+		float sw = (float)ofGetWidth(), sh = (float)ofGetHeight();
+		float x = 0, y = 0, dw = sw, dh = sh;
+		int fitMode = videoFitMode.get();
+		if (fitMode == 1 && ih > 0) {
+			dh = sh;
+			dw = (iw / ih) * sh;
+			x = (sw - dw) * 0.5f;
+			y = 0;
+		} else if (fitMode == 2 && iw > 0) {
+			dw = sw;
+			dh = (ih / iw) * sw;
+			x = 0;
+			y = (sh - dh) * 0.5f;
+		}
+		currentImage.draw(x, y, dw, dh);
+	}
+}
+
+//--------------------------------------------------------------
+std::string ofApp::getSpectrogramColorName(int index) {
+	static const std::string colors[] = {
+		"intensity", "fire", "magma", "plasma", "viridis", "rainbow", "moreland", "nebulae", "cool", "fiery", "green", "gray"
+	};
+	if (index >= 0 && index < 12) {
+		return colors[index];
+	}
+	return "moreland";
+}
+
+//--------------------------------------------------------------
+void ofApp::spreadPointsApart() {
+	if (points.empty()) return;
+
+	// Calculate base parameters (e.g., basePointRadiusWorld, textHeightWorld)
+	float extMinX = std::numeric_limits<float>::max();
+	float extMaxX = std::numeric_limits<float>::lowest();
+	float extMinY = std::numeric_limits<float>::max();
+	float extMaxY = std::numeric_limits<float>::lowest();
+	for (const auto & p : points) {
+		extMinX = std::min(extMinX, p.x);
+		extMaxX = std::max(extMaxX, p.x);
+		extMinY = std::min(extMinY, p.y);
+		extMaxY = std::max(extMaxY, p.y);
+	}
+	float pointsDiag = ofVec2f(extMaxX - extMinX, extMaxY - extMinY).length();
+	pointsDiag = std::max(pointsDiag, 1e-6f);
+	float sizeT = std::clamp((pointSize.get() - 1.0f) / 99.0f, 0.0f, 1.0f);
+	float diagFactor = (1.0f / 1000.0f) * std::pow(1000.0f, sizeT);
+	float basePointRadiusWorld = pointsDiag * diagFactor;
+	float textHeightWorld = basePointRadiusWorld * fontSize.get() * 0.24f;
+
+	std::vector<ofVec2f> origPositions(points.size());
+	std::vector<ofVec2f> currentPositions(points.size());
+	std::vector<ofVec2f> sizes(points.size()); // width and height for each point
+
+	for (size_t i = 0; i < points.size(); ++i) {
+		origPositions[i] = ofVec2f(points[i].x, points[i].y);
+		currentPositions[i] = origPositions[i];
+
+		float w = basePointRadiusWorld * 2.0f;
+		float h = basePointRadiusWorld * 2.0f;
+		if (showText && !points[i].text.empty()) {
+			if (font.isLoaded()) {
+				ofRectangle bounds = font.getStringBoundingBox(points[i].text, 0, 0);
+				float fh = bounds.height > 0.0f ? bounds.height : fontSize.get();
+				float scale = textHeightWorld / fh;
+				w = bounds.width * scale;
+				h = bounds.height * scale;
+			} else {
+				w = points[i].text.length() * 8.0f * (textHeightWorld / 12.0f);
+				h = textHeightWorld;
+			}
+		}
+		// Add a margin to guarantee separation
+		w += basePointRadiusWorld * 0.6f;
+		h += basePointRadiusWorld * 0.6f;
+		sizes[i] = ofVec2f(w, h);
+	}
+
+	// Run relaxation iterations
+	int numIterations = 80;
+	float springStrength = 0.02f; // Weak pull back to original position
+
+	for (int iter = 0; iter < numIterations; ++iter) {
+		// 1. Pairwise repulsion
+		for (size_t i = 0; i < points.size(); ++i) {
+			for (size_t j = i + 1; j < points.size(); ++j) {
+				float dx = currentPositions[i].x - currentPositions[j].x;
+				float dy = currentPositions[i].y - currentPositions[j].y;
+
+				if (showText) {
+					// Rectangular overlap resolution (AABB collision)
+					float minXDist = (sizes[i].x + sizes[j].x) * 0.5f;
+					float minYDist = (sizes[i].y + sizes[j].y) * 0.5f;
+					float overlapX = minXDist - std::abs(dx);
+					float overlapY = minYDist - std::abs(dy);
+
+					if (overlapX > 0 && overlapY > 0) {
+						if (overlapX < overlapY) {
+							float pushX = overlapX * 0.5f;
+							float sign = (dx >= 0) ? 1.0f : -1.0f;
+							if (dx == 0) sign = (i % 2 == 0) ? 1.0f : -1.0f;
+							currentPositions[i].x += sign * pushX;
+							currentPositions[j].x -= sign * pushX;
+						} else {
+							float pushY = overlapY * 0.5f;
+							float sign = (dy >= 0) ? 1.0f : -1.0f;
+							if (dy == 0) sign = (i % 2 == 0) ? 1.0f : -1.0f;
+							currentPositions[i].y += sign * pushY;
+							currentPositions[j].y -= sign * pushY;
+						}
+					}
+				} else {
+					// Circular overlap resolution
+					float dist = std::sqrt(dx*dx + dy*dy);
+					float minDist = (sizes[i].x + sizes[j].x) * 0.5f;
+					if (dist < minDist) {
+						float overlap = minDist - dist;
+						ofVec2f dir;
+						if (dist > 0.0f) {
+							dir = ofVec2f(dx, dy) / dist;
+						} else {
+							dir = ofVec2f(ofRandom(-1, 1), ofRandom(-1, 1)).getNormalized();
+						}
+						currentPositions[i] += dir * overlap * 0.5f;
+						currentPositions[j] -= dir * overlap * 0.5f;
+					}
+				}
+			}
+		}
+
+		// 2. Spring pull back to original position
+		for (size_t i = 0; i < points.size(); ++i) {
+			currentPositions[i] += (origPositions[i] - currentPositions[i]) * springStrength;
+		}
+	}
+
+	// 3. Write resolved positions back
+	for (size_t i = 0; i < points.size(); ++i) {
+		points[i].x = currentPositions[i].x;
+		points[i].y = currentPositions[i].y;
+
+		switch (currentCloudMode) {
+		case PointCloudMode::LOCAL:
+			points[i].pos_local = currentPositions[i];
+			break;
+		case PointCloudMode::MID:
+			points[i].pos_mid = currentPositions[i];
+			break;
+		case PointCloudMode::GLOBAL:
+			points[i].pos_global = currentPositions[i];
+			break;
+		}
+	}
+
+	// Rebuild spatial grid for interactions
+	if (spatialGrid && !points.empty()) {
+		spatialGrid = std::make_shared<SpatialGrid>(points, 50.0f / std::max(zoom, 0.001f));
+	}
+
+	ofLogNotice("ofApp") << "Points spread apart layout completed.";
 }

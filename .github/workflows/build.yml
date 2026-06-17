@@ -32,7 +32,7 @@ jobs:
       - name: Generate Xcode project
         run: |
           chmod +x ./projectGenerator/projectGenerator.app/Contents/Resources/app/app/projectGenerator
-          ./projectGenerator/projectGenerator.app/Contents/Resources/app/app/projectGenerator -o"." "apps/myApps/Konvolute"
+          ./projectGenerator/projectGenerator.app/Contents/Resources/app/app/projectGenerator -o"." -p"osx" "apps/myApps/Konvolute"
 
       - name: Compile macOS App
         run: |
@@ -75,7 +75,7 @@ jobs:
       - name: Generate Visual Studio project
         shell: pwsh
         run: |
-          ./projectGenerator/resources/app/app/projectGenerator.exe -o"." "apps/myApps/Konvolute"
+          ./projectGenerator/resources/app/app/projectGenerator.exe -o"." -p"vs" "apps/myApps/Konvolute"
 
       - name: Build Windows App
         run: |

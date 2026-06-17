@@ -11,11 +11,12 @@ jobs:
     name: Build macOS (Universal Binary)
     runs-on: macos-14
     steps:
-      - name: Setup openFrameworks
-        uses: nandenjin/openframeworks-action@v1
-        with:
-          command: setup-of
-          of_version: 0.12.1
+      - name: Download openFrameworks 0.12.1
+        run: |
+          curl -L -o of.tar.gz https://github.com/openframeworks/openFrameworks/releases/download/0.12.1/of_v0.12.1_osx_release.tar.gz
+          tar -xzf of.tar.gz
+          mv of_v0.12.1_osx_release/* .
+          rm -rf of_v0.12.1_osx_release of.tar.gz
 
       - name: Checkout external addon ofxJSON
         uses: actions/checkout@v4
@@ -29,10 +30,9 @@ jobs:
           path: apps/myApps/Konvolute
 
       - name: Generate Xcode project
-        uses: nandenjin/openframeworks-action@v1
-        with:
-          command: projectgenerator
-          project_root: apps/myApps/Konvolute
+        run: |
+          chmod +x ./projectGenerator.app/Contents/Resources/app/app/projectGenerator
+          ./projectGenerator.app/Contents/Resources/app/app/projectGenerator -o"." "apps/myApps/Konvolute"
 
       - name: Compile macOS App
         run: |
@@ -50,11 +50,13 @@ jobs:
     name: Build Windows (PC)
     runs-on: windows-latest
     steps:
-      - name: Setup openFrameworks
-        uses: nandenjin/openframeworks-action@v1
-        with:
-          command: setup-of
-          of_version: 0.12.1
+      - name: Download openFrameworks 0.12.1
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/openframeworks/openFrameworks/releases/download/0.12.1/of_v0.12.1_vs_64_release.zip" -OutFile "of.zip"
+          Expand-Archive -Path "of.zip" -DestinationPath "temp_of"
+          Get-ChildItem -Path "temp_of\of_v*" | Get-ChildItem | Move-Item -Destination "."
+          Remove-Item -Recurse -Force temp_of, of.zip
 
       - name: Checkout external addon ofxJSON
         uses: actions/checkout@v4
@@ -71,10 +73,9 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Generate Visual Studio project
-        uses: nandenjin/openframeworks-action@v1
-        with:
-          command: projectgenerator
-          project_root: apps/myApps/Konvolute
+        shell: pwsh
+        run: |
+          ./projectGenerator/projectGenerator.exe -o"." "apps/myApps/Konvolute"
 
       - name: Build Windows App
         run: |

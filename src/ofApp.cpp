@@ -8,7 +8,13 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#ifndef TARGET_WIN32
 #include <unistd.h>
+#else
+#include <io.h>
+#define X_OK 0
+#define access _access
+#endif
 
 static uint32_t stableStringHash(const std::string & s) {
 	uint32_t h = 2166136261u;
@@ -110,16 +116,27 @@ static bool ffmpegAvailable() {
 		if (pathEnv != nullptr) {
 			std::stringstream ss(pathEnv);
 			std::string item;
-			while (std::getline(ss, item, ':')) {
+#ifdef TARGET_WIN32
+			char separator = ';';
+#else
+			char separator = ':';
+#endif
+			while (std::getline(ss, item, separator)) {
 				if (!item.empty()) dirs.push_back(item);
 			}
 		}
+#ifndef TARGET_WIN32
 		dirs.push_back("/opt/homebrew/bin");
 		dirs.push_back("/usr/local/bin");
 		dirs.push_back("/usr/bin");
 		dirs.push_back("/bin");
+#endif
 		for (const auto & d : dirs) {
+#ifdef TARGET_WIN32
+			std::string p = d + "\\" + name + ".exe";
+#else
 			std::string p = d + "/" + name;
+#endif
 			if (isExec(p)) return p;
 		}
 		return std::string();
@@ -140,16 +157,27 @@ static std::string ffmpegExecutablePath() {
 	if (pathEnv != nullptr) {
 		std::stringstream ss(pathEnv);
 		std::string item;
-		while (std::getline(ss, item, ':')) {
+#ifdef TARGET_WIN32
+		char separator = ';';
+#else
+		char separator = ':';
+#endif
+		while (std::getline(ss, item, separator)) {
 			if (!item.empty()) dirs.push_back(item);
 		}
 	}
+#ifndef TARGET_WIN32
 	dirs.push_back("/opt/homebrew/bin");
 	dirs.push_back("/usr/local/bin");
 	dirs.push_back("/usr/bin");
 	dirs.push_back("/bin");
+#endif
 	for (const auto & d : dirs) {
+#ifdef TARGET_WIN32
+		std::string p = d + "\\" + "ffmpeg.exe";
+#else
 		std::string p = d + "/ffmpeg";
+#endif
 		if (isExec(p)) return p;
 	}
 	return "ffmpeg";
@@ -164,16 +192,27 @@ static std::string ffprobeExecutablePath() {
 	if (pathEnv != nullptr) {
 		std::stringstream ss(pathEnv);
 		std::string item;
-		while (std::getline(ss, item, ':')) {
+#ifdef TARGET_WIN32
+		char separator = ';';
+#else
+		char separator = ':';
+#endif
+		while (std::getline(ss, item, separator)) {
 			if (!item.empty()) dirs.push_back(item);
 		}
 	}
+#ifndef TARGET_WIN32
 	dirs.push_back("/opt/homebrew/bin");
 	dirs.push_back("/usr/local/bin");
 	dirs.push_back("/usr/bin");
 	dirs.push_back("/bin");
+#endif
 	for (const auto & d : dirs) {
+#ifdef TARGET_WIN32
+		std::string p = d + "\\" + "ffprobe.exe";
+#else
 		std::string p = d + "/ffprobe";
+#endif
 		if (isExec(p)) return p;
 	}
 	return "ffprobe";

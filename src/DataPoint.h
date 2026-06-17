@@ -23,17 +23,18 @@ struct DataPoint {
     float cluster_membership;
     float attack;
     float brightness;
+    float duration;
 
     DataPoint() : x(0), y(0), filename(""), text(""),
                   pos_local(0,0), pos_mid(0,0), pos_global(0,0),
                   instability(0), cluster_id(-1), cluster_membership(0),
-                  attack(0), brightness(0) {}
+                  attack(0), brightness(0), duration(-1.0f) {}
 
     DataPoint(float _x, float _y, std::string _filename, std::string _text)
         : x(_x), y(_y), filename(_filename), text(_text),
           pos_local(0,0), pos_mid(0,0), pos_global(0,0),
           instability(0), cluster_id(-1), cluster_membership(0),
-          attack(0), brightness(0) {}
+          attack(0), brightness(0), duration(-1.0f) {}
 
     // Equality operator for HashSet equivalent (std::unordered_set)
     bool operator==(const DataPoint& other) const {

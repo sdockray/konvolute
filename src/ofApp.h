@@ -235,6 +235,7 @@ public:
 	bool videoTriggerLocked = false;
 	bool showText;
 	bool showTitle;
+	bool showPointsAndPaths = true;
 	string compositionTitle;
 	bool showGui;
 	bool showDebug;
@@ -376,6 +377,8 @@ public:
 	void setViewTarget(float newZoom, const ofVec2f & newPan, bool animate = true);
 	void zoomToDataExtents(bool animate = true, bool includeAnnotations = true);
 	bool loadPoints(string jsonPath, bool loadGlobalAnnotations = true);
+	float getWavDuration(const std::string& filepath);
+	void resolvePathAudioDurations(std::shared_ptr<PathObject> path);
 	void sendOscMessage(string num, float val);
 	void triggerVideo(const DataPoint & p);
 	void sendFullUIUpdate(std::shared_ptr<PathObject> p);

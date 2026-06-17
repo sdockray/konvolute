@@ -1,0 +1,93 @@
+name: Build Konvolute
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+
+jobs:
+  build-macos:
+    name: Build macOS (Universal Binary)
+    runs-on: macos-14
+    steps:
+      - name: Setup openFrameworks
+        uses: nandenjin/openframeworks-action@v1
+        with:
+          command: setup-of
+          of_version: 0.12.1
+
+      - name: Checkout external addon ofxJSON
+        uses: actions/checkout@v4
+        with:
+          repository: jefftimesten/ofxJSON
+          path: addons/ofxJSON
+
+      - name: Checkout project
+        uses: actions/checkout@v4
+        with:
+          path: apps/myApps/Konvolute
+
+      - name: Generate Xcode project
+        uses: nandenjin/openframeworks-action@v1
+        with:
+          command: projectgenerator
+          project_root: apps/myApps/Konvolute
+
+      - name: Compile macOS App
+        run: |
+          cd apps/myApps/Konvolute
+          chmod +x build_release.sh
+          ./build_release.sh
+
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Konvolute_macOS
+          path: apps/myApps/Konvolute/bin/Konvolute.zip
+
+  build-windows:
+    name: Build Windows (PC)
+    runs-on: windows-latest
+    steps:
+      - name: Setup openFrameworks
+        uses: nandenjin/openframeworks-action@v1
+        with:
+          command: setup-of
+          of_version: 0.12.1
+
+      - name: Checkout external addon ofxJSON
+        uses: actions/checkout@v4
+        with:
+          repository: jefftimesten/ofxJSON
+          path: addons/ofxJSON
+
+      - name: Checkout project
+        uses: actions/checkout@v4
+        with:
+          path: apps/myApps/Konvolute
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Generate Visual Studio project
+        uses: nandenjin/openframeworks-action@v1
+        with:
+          command: projectgenerator
+          project_root: apps/myApps/Konvolute
+
+      - name: Build Windows App
+        run: |
+          msbuild apps/myApps/Konvolute/Konvolute.sln /p:Configuration=Release /p:Platform=x64
+
+      - name: Create Windows Release Zip
+        shell: pwsh
+        run: |
+          cd apps/myApps/Konvolute/bin
+          Compress-Archive -Path * -DestinationPath ../../../../Konvolute_Windows.zip
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Konvolute_Windows
+          path: Konvolute_Windows.zip

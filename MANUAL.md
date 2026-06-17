@@ -23,7 +23,8 @@ This manual summarizes keyboard shortcuts and gestural controls for performance 
 - `Space`: Play/pause selected path
 - `Enter`: Toggle global playback (all paths)
 - `q`: Create sequential path from points
-- `e`: Toggle step mode for selected sequential path
+- `e`: Toggle step mode (fixed time steps) for selected sequential path
+- `E`: Toggle step mode (audio-duration steps) for selected sequential path
 - `j`: Toggle jitter mode on selected path
 - `l`: Toggle default path mode (LOOP/ONCE)
 - `y`: Toggle ping-pong on selected/current path
@@ -42,6 +43,8 @@ This manual summarizes keyboard shortcuts and gestural controls for performance 
 - `Right Arrow`: Increase radius on selected path (or `path-0`) with fine control
 - `Up Arrow`: Increase speed on selected path (or `path-0`) with fine control
 - `Down Arrow`: Decrease speed on selected path (or `path-0`) with fine control
+- `Shift + [`: Decrease rest duration on selected path (or `path-0`) with fine control
+- `Shift + ]`: Increase rest duration on selected path (or `path-0`) with fine control
 
 Arrow fine-control notes:
 
@@ -56,16 +59,18 @@ Arrow fine-control notes:
 - `z`: Zoom to extents
 - `0`: Pull all annotation labels inside point bounds
 
-### Video
+### Video & Still Images
 
 - `m`: Toggle video mode on/off
-- `M` (`Shift + m`): Toggle video routing on selected path (or `path-0` if none selected)
+- `M` (`Shift + m`): Toggle video routing on selected path (or `path-0` fallback)
 - `;`: Toggle video trigger lock/unlock
+- `.`: Toggle still image mode on/off
 
 ### Display and UI
 
 - `t`: Toggle text labels
-- `i`: Toggle title (when neighbour mode is OFF)
+- `i`: Toggle title (when neighbour mode is OFF; when text mode `t` is active, toggling `i` shows the text of the currently playing audio samples instead of the composition title)
+- `A` (`Shift + a`): Hide/Show all points and paths (toggle visibility)
 - `h`: Toggle help overlay
 - `,`: Toggle settings panel
 - `d`: Toggle debug display
@@ -77,6 +82,7 @@ Arrow fine-control notes:
 - `2`: Cloud mode MID
 - `3`: Cloud mode GLOBAL
 - `4`: Cycle third dimension display
+- `~` or `` ` ``: Spread points/labels apart to minimize overlap (runs once on keystroke)
 - `[`: Previous cluster filter
 - `]`: Next cluster filter
 - `\\`: Clear cluster filter
@@ -127,6 +133,7 @@ Typing controls:
 
 - Hold mouse button: audition nearest point continuously
 - Click near a path and drag: move that path
+- `Shift + drag` near a path vertex: reshape that path (move the dragged control point)
 
 ### Gesture Recording and Scrub
 

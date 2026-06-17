@@ -72,8 +72,9 @@ AppCommand InputManager::getCommandForKey(int key) {
 	case 'G':
 		return CMD_CLEAR_GESTURE;
 	case 'e':
-	case 'E':
 		return CMD_TOGGLE_STEP_MODE;
+	case 'E':
+		return CMD_TOGGLE_AUDIO_DURATION_STEP_MODE;
 	case 'h':
 	case 'H':
 		return CMD_TOGGLE_HELP;
@@ -119,8 +120,9 @@ AppCommand InputManager::getCommandForKey(int key) {
 	case '\\':
 		return CMD_CLUSTER_CLEAR;
 	case 'a':
-	case 'A':
 		return CMD_TOGGLE_DATA_VISIBILITY;
+	case 'A':
+		return CMD_TOGGLE_POINTS_AND_PATHS_VISIBILITY;
 	default:
 		return CMD_NONE;
 	}

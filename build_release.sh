@@ -4,7 +4,8 @@
 # Usage: ./build_release.sh
 set -e
 
-OF="/Users/sdoc0001/Documents/dev/of_v0.12.1"
+OF_PATH_RELATIVE="$(cd "$(dirname "$0")/../../.." && pwd)"
+OF="${OF_PATH:-$OF_PATH_RELATIVE}"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP="$PROJECT_DIR/bin/Konvolute.app"
 ZIP="$PROJECT_DIR/bin/Konvolute.zip"

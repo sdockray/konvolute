@@ -44,7 +44,9 @@ PathObject::PathObject(int _id)
 	, jitterMode(false)
 	, lastJitterStepFloor(-1)
 	, stepMode(false)
+	, stepModeAudioDuration(false)
 	, stepTimer(0.0f)
+	, stepTriggered(false)
 	, hasGesture(false)
 	, gestureStartTime(0)
 	, gesturePlaybackTime(0.0f)
@@ -109,6 +111,7 @@ void PathObject::togglePlayback() { isActive = !isActive; }
 void PathObject::clearGesture() {
 	hasGesture = false;
 	gesturePoints.clear();
+	gestures.clear();
 }
 
 void PathObject::translate(ofVec2f delta) {
@@ -176,6 +179,29 @@ std::string PathObject::getMode() const {
 	}
 }
 
+int PathObject::getNextJitterIndex(int currentIndex, int totalSteps) {
+	if (totalSteps <= 0) return 0;
+	float r = ofRandom(1.0f);
+	int nextStepIndex = currentIndex;
+	if (r < 0.20f) {
+		// 20%: go back one
+		nextStepIndex = currentIndex - 1;
+	} else if (r < 0.50f) {
+		// 60%: repeat (stay)
+		nextStepIndex = currentIndex;
+	} else {
+		// 20%: advance one
+		nextStepIndex = currentIndex + 1;
+	}
+	nextStepIndex = ((nextStepIndex % totalSteps) + totalSteps) % totalSteps;
+
+	ofLogNotice("Jitter") << "Path " << name << " jitter decision: r=" << r
+						  << ", oldStep=" << currentIndex
+						  << ", nextStep=" << nextStepIndex;
+
+	return nextStepIndex;
+}
+
 void PathObject::update(float dt) {
 	if (!attachedPoints.empty() && attachedPoints.size() == controlPoints.size()) {
 		bool changed = false;
@@ -231,16 +257,42 @@ void PathObject::update(float dt) {
 	}
 
 	// Step mode: advance currentStepIndex via timer, skip polyline position logic
+	stepTriggered = false;
 	if (stepMode && isSequential && !sequentialPoints.empty()) {
-		stepTimer += speed * dt; // 1.0 speed = 1 step per second
+		int n = (int)sequentialPoints.size();
+		float perimeter = polyline.getPerimeter();
+		float stepRate = speed; // Fallback: 1.0 speed = 1 step per second
+		if (stepModeAudioDuration) {
+			float duration = 1.0f;
+			if (currentStepIndex >= 0 && currentStepIndex < n) {
+				float ptDur = sequentialPoints[currentStepIndex].duration;
+				if (ptDur > 0.0f) {
+					duration = ptDur;
+				}
+			}
+			stepRate = 1.0f / duration;
+		} else if (perimeter > 0.001f && n > 1) {
+			// Calibrate step rate so it matches the average time taken by the normal
+			// playhead to traverse a single segment at the same speed.
+			stepRate = (speed * 60.0f * (n - 1)) / perimeter;
+		}
+		stepTimer += stepRate * dt;
 		if (stepTimer >= 1.0f) {
 			stepTimer -= 1.0f;
-			int n = (int)sequentialPoints.size();
-			if (direction == -1) {
-				currentStepIndex = (currentStepIndex <= 0) ? n - 1 : currentStepIndex - 1;
+			stepTriggered = true;
+
+			int nextStepIndex = currentStepIndex;
+			if (jitterMode) {
+				nextStepIndex = getNextJitterIndex(currentStepIndex, n);
 			} else {
-				currentStepIndex = (currentStepIndex + 1) % n;
+				if (direction == -1) {
+					nextStepIndex = (currentStepIndex <= 0) ? n - 1 : currentStepIndex - 1;
+				} else {
+					nextStepIndex = (currentStepIndex + 1) % n;
+				}
 			}
+			currentStepIndex = nextStepIndex;
+
 			// Keep position in sync for visual/gesture purposes
 			position = (n > 1) ? (float)currentStepIndex / (float)(n - 1) : 0.0f;
 		}
@@ -253,30 +305,73 @@ void PathObject::update(float dt) {
 	// -------------------------------------------------------------
 	// GESTURE PLAYBACK
 	// -------------------------------------------------------------
-	if (hasGesture && gesturePoints.size() >= 2) {
-		float durationMs = gesturePoints.back().timeMs - gesturePoints.front().timeMs;
-		if (durationMs > 0.001f) {
-			float speedFactor = speed / 0.001f;
-			gesturePlaybackTime += (dt * 1000.0f) * speedFactor;
-
-			// Wrap playback time over the gesture duration
-			float localTime = std::fmod(gesturePlaybackTime, durationMs);
-			if (localTime < 0) localTime += durationMs;
-
-			long targetTimeMs = gesturePoints.front().timeMs + (long)localTime;
-
-			// Find bounding gesture points and interpolate
-			for (size_t i = 0; i + 1 < gesturePoints.size(); ++i) {
-				const auto & a = gesturePoints[i];
-				const auto & b = gesturePoints[i + 1];
-				if (targetTimeMs >= a.timeMs && targetTimeMs <= b.timeMs) {
-					float t = 0.0f;
-					if (b.timeMs > a.timeMs) {
-						t = (float)(targetTimeMs - a.timeMs) / (float)(b.timeMs - a.timeMs);
+	if (!gestures.empty()) {
+		for (auto & g : gestures) {
+			if (g.points.size() < 2) continue;
+			float durationMs = g.points.back().timeMs - g.points.front().timeMs;
+			if (durationMs > 0.001f) {
+				if (g.restTimer > 0.0f) {
+					g.restTimer -= dt;
+					if (g.restTimer <= 0.0f) {
+						g.restTimer = 0.0f;
+						if (speed >= 0.0f) {
+							g.playbackTime = 0.0f;
+							g.position = g.points.front().position;
+							g.volume = g.points.front().volume;
+						} else {
+							g.playbackTime = durationMs;
+							g.position = g.points.back().position;
+							g.volume = g.points.back().volume;
+						}
 					}
-					position = a.position + t * (b.position - a.position);
-					volume = a.volume + t * (b.volume - a.volume);
-					break;
+				} else {
+					float speedFactor = speed / 0.001f;
+					g.playbackTime += (dt * 1000.0f) * speedFactor;
+
+					if (speed >= 0.0f) {
+						if (g.playbackTime >= durationMs) {
+							if (restDuration > 0.0f) {
+								g.restTimer = restDuration;
+								g.playbackTime = durationMs;
+								g.position = g.points.back().position;
+								g.volume = g.points.back().volume;
+							} else {
+								g.playbackTime = std::fmod(g.playbackTime, durationMs);
+							}
+						}
+					} else {
+						if (g.playbackTime <= 0.0f) {
+							if (restDuration > 0.0f) {
+								g.restTimer = restDuration;
+								g.playbackTime = 0.0f;
+								g.position = g.points.front().position;
+								g.volume = g.points.front().volume;
+							} else {
+								g.playbackTime = std::fmod(g.playbackTime, durationMs);
+								if (g.playbackTime < 0.0f) g.playbackTime += durationMs;
+							}
+						}
+					}
+
+					if (g.restTimer <= 0.0f) {
+						float localTime = g.playbackTime;
+						long targetTimeMs = g.points.front().timeMs + (long)localTime;
+
+						// Find bounding gesture points and interpolate
+						for (size_t i = 0; i + 1 < g.points.size(); ++i) {
+							const auto & a = g.points[i];
+							const auto & b = g.points[i + 1];
+							if (targetTimeMs >= a.timeMs && targetTimeMs <= b.timeMs) {
+								float t = 0.0f;
+								if (b.timeMs > a.timeMs) {
+									t = (float)(targetTimeMs - a.timeMs) / (float)(b.timeMs - a.timeMs);
+								}
+								g.position = a.position + t * (b.position - a.position);
+								g.volume = a.volume + t * (b.volume - a.volume);
+								break;
+							}
+						}
+					}
 				}
 			}
 		}
@@ -385,18 +480,41 @@ void PathObject::draw(float playheadSize, ofColor playheadColor, float zoom, flo
 	ofSetLineWidth(1.0f);
 
 	// Draw cursor
-	ofVec2f pos = getCurrentPosition();
-	ofNoFill();
-	ofSetColor(playheadColor);
-	ofDrawCircle(pos, radius); // actual catchment radius in world units
-	ofFill();
-	ofDrawCircle(pos, playheadSize); // already /zoom from caller
+	if (!gestures.empty()) {
+		for (int gi = 0; gi < (int)gestures.size(); ++gi) {
+			const auto & g = gestures[gi];
+			if (g.points.size() < 2) continue;
+			ofVec2f pos = polyline.getPointAtPercent(g.position);
+			ofNoFill();
+			// Draw cursor for this gesture
+			// Slightly fade older gestures' circles
+			int alpha = (gi == (int)gestures.size() - 1) ? 255 : 120;
+			ofSetColor(playheadColor.r, playheadColor.g, playheadColor.b, alpha);
+			ofDrawCircle(pos, radius); // actual catchment radius in world units
+			ofFill();
+			ofDrawCircle(pos, playheadSize); // already /zoom from caller
 
-	// Draw lines to active points
-	ofSetColor(255, 100);
-	for (const auto & p : lastActivePoints) {
-		ofDrawLine(pos, ofVec2f(p.x, p.y));
-		ofDrawCircle(p.x, p.y, 3.0f / zoom); // screen-pixel dot
+			// Draw lines from this gesture's playhead to its active points
+			ofSetColor(255, alpha * 100 / 255);
+			for (const auto & p : g.playingPoints) {
+				ofDrawLine(pos, ofVec2f(p.x, p.y));
+				ofDrawCircle(p.x, p.y, 3.0f / zoom); // screen-pixel dot
+			}
+		}
+	} else {
+		ofVec2f pos = getCurrentPosition();
+		ofNoFill();
+		ofSetColor(playheadColor);
+		ofDrawCircle(pos, radius); // actual catchment radius in world units
+		ofFill();
+		ofDrawCircle(pos, playheadSize); // already /zoom from caller
+
+		// Draw lines to active points
+		ofSetColor(255, 100);
+		for (const auto & p : lastActivePoints) {
+			ofDrawLine(pos, ofVec2f(p.x, p.y));
+			ofDrawCircle(p.x, p.y, 3.0f / zoom); // screen-pixel dot
+		}
 	}
 	// Gesture overlay is drawn in screen-space by ofApp::draw()
 }

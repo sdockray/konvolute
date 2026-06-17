@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <unistd.h>
 
@@ -963,6 +964,7 @@ void ofApp::setup() {
 	showImage = false;
 	showText = false;
 	showTitle = false;
+	showPointsAndPaths = true;
 	compositionTitle = "";
 	lastLoadedCompositionPath = "";
 	showGui = false;
@@ -1704,6 +1706,25 @@ void ofApp::update() {
 	float dt = 1.0f / 60.0f; // Fixed time step for simplicity
 
 	for (auto & path : paths) {
+		// Resolve dynamic duration for current step if needed in audio duration step mode
+		if (path->stepMode && path->stepModeAudioDuration && path->isSequential && !path->sequentialPoints.empty()) {
+			int idx = path->currentStepIndex;
+			if (idx >= 0 && idx < (int)path->sequentialPoints.size()) {
+				if (path->sequentialPoints[idx].duration < 0.0f) {
+					float dur = getWavDuration(mediaRoot + path->sequentialPoints[idx].filename);
+					path->sequentialPoints[idx].duration = (dur > 0.0f) ? dur : 1.0f;
+
+					// Sync to master points list
+					for (auto & p : points) {
+						if (p.filename == path->sequentialPoints[idx].filename) {
+							p.duration = path->sequentialPoints[idx].duration;
+							break;
+						}
+					}
+				}
+			}
+		}
+
 		int prevStepIndex = path->currentStepIndex; // snapshot before update (for stepMode detection)
 		path->update(dt);
 
@@ -1711,6 +1732,105 @@ void ofApp::update() {
 
 		// Audio Sampling Logic
 		if (path->isActive && spatialGrid) {
+			if (!path->gestures.empty()) {
+				// Multiple Gestures Logic
+				for (int gi = 0; gi < (int)path->gestures.size(); ++gi) {
+					auto & gesture = path->gestures[gi];
+					if (gesture.points.size() < 2) continue;
+
+					std::string voiceName = path->name + "-g" + ofToString(gi);
+					float gestureVolume = gesture.volume;
+
+					// Query active points at gesture's current position
+					ofVec2f gPos = path->polyline.getPointAtPercent(gesture.position);
+					std::vector<DataPoint> activePoints = spatialGrid->findPointsInRadius(gPos.x, gPos.y, path->radius);
+
+					// 1. Clean up points that left radius
+					std::vector<DataPoint> toRemove;
+					for (const auto & p : gesture.playingPoints) {
+						bool stillInRadius = false;
+						for (const auto & ap : activePoints) {
+							if (ap == p) {
+								stillInRadius = true;
+								break;
+							}
+						}
+						if (!stillInRadius) {
+							toRemove.push_back(p);
+						}
+					}
+					for (const auto & p : toRemove) {
+						oscManager.stopSample(mediaRoot + p.filename, voiceName);
+						gesture.playingPoints.erase(p);
+					}
+
+					// 2. Trigger new points
+					int slotsAvailable = path->sampleNum - gesture.playingPoints.size();
+					if (slotsAvailable > 0) {
+						for (const auto & p : activePoints) {
+							if (slotsAvailable <= 0) break;
+							if (gesture.playingPoints.find(p) == gesture.playingPoints.end()) {
+								gesture.playingPoints.insert(p);
+								slotsAvailable--;
+
+								if (path->mode == PathObject::LOOP_MODE || path->mode == PathObject::MIXED_MODE || path->mode == PathObject::ONCE_MODE) {
+									float d = gPos.distance(ofVec2f(p.x, p.y));
+									float vol = gestureVolume * (1.0f - (d / path->radius));
+									vol = MAX(0, vol);
+									oscManager.sendSample(mediaRoot + p.filename, voiceName, vol, path->getMode());
+									noteTriggeredMediaForSpectrogram(mediaRoot + p.filename);
+								}
+								if (showVideo && path->sendToVideo) triggerVideo(p);
+							}
+						}
+					}
+
+					// 3. Continuous updates for playing points (Granular/Cloud mode)
+					if (path->mode == PathObject::CLOUD_MODE || path->mode == PathObject::MIXED_MODE) {
+						for (const auto & p : gesture.playingPoints) {
+							float d = gPos.distance(ofVec2f(p.x, p.y));
+							float vol = gestureVolume * (1.0f - (d / path->radius));
+							vol = MAX(0, vol);
+
+							float posBase = ofMap(gesture.position, 0.0f, 1.0f, path->gPosMin, path->gPosMax, true);
+							float posJitter = ofRandom(-path->gRand, path->gRand) * 0.35f;
+							float pos = ofClamp(posBase + posJitter, path->gPosMin, path->gPosMax);
+
+							path->grainRateWalk = ofClamp(path->grainRateWalk + ofRandom(-0.08f, 0.08f), 0.0f, 1.0f);
+							path->grainDurWalk = ofClamp(path->grainDurWalk + ofRandom(-0.06f, 0.06f), 0.0f, 1.0f);
+							path->grainDensityWalk = ofClamp(path->grainDensityWalk + ofRandom(-0.09f, 0.09f), 0.0f, 1.0f);
+
+							path->grainRateWalk = ofLerp(path->grainRateWalk, 0.5f, 0.01f);
+							path->grainDurWalk = ofLerp(path->grainDurWalk, 0.5f, 0.01f);
+							path->grainDensityWalk = ofLerp(path->grainDensityWalk, 0.5f, 0.01f);
+
+							path->grainMotionPhase += dt * ofMap(path->speed, 0.0f, 0.02f, 0.08f, 0.9f, true);
+							if (path->grainMotionPhase > TWO_PI) path->grainMotionPhase -= TWO_PI;
+							float lfo = 0.5f + 0.5f * sin(path->grainMotionPhase);
+
+							float rateNorm = ofClamp(path->grainRateWalk * 0.75f + lfo * 0.25f, 0.0f, 1.0f);
+							float durNorm = ofClamp(path->grainDurWalk * 0.75f + (1.0f - lfo) * 0.25f, 0.0f, 1.0f);
+							float densNorm = ofClamp(path->grainDensityWalk * 0.65f + lfo * 0.35f, 0.0f, 1.0f);
+
+							float rate = ofLerp(path->gRateMin, path->gRateMax, rateNorm);
+							float dur = ofLerp(path->gDurMin, path->gDurMax, durNorm);
+							int grainDensity = (int)std::round(ofLerp((float)path->gGrainRateMin, (float)path->gGrainRateMax, densNorm));
+							grainDensity = ofClamp(grainDensity, path->gGrainRateMin, path->gGrainRateMax);
+
+							oscManager.updateGrain(mediaRoot + p.filename, voiceName,
+								rate,
+								pos,
+								vol,
+								dur,
+								grainDensity,
+								path->gRand,
+								path->gEnv);
+						}
+					}
+				}
+				continue; // skip normal single playhead logic
+			}
+
 			// Get active points
 			std::vector<DataPoint> activePoints = path->getActivePoints(points, *spatialGrid);
 
@@ -1724,7 +1844,8 @@ void ofApp::update() {
 					// Step mode: PathObject::update() already advanced currentStepIndex via timer.
 					// Just detect the change and trigger/stop samples.
 					if (path->stepMode) {
-						if (path->currentStepIndex != prevStepIndex && path->currentStepIndex >= 0) {
+						bool triggerSample = path->stepTriggered || (path->currentStepIndex != prevStepIndex);
+						if (triggerSample && path->currentStepIndex >= 0) {
 							// Stop previous
 							if (prevStepIndex >= 0 && prevStepIndex < totalSteps) {
 								DataPoint & prev = path->sequentialPoints[prevStepIndex];
@@ -1755,19 +1876,7 @@ void ofApp::update() {
 						if (posFloor != path->lastJitterStepFloor) {
 							// A boundary was crossed — decide where to go
 							path->lastJitterStepFloor = posFloor;
-							float r = ofRandom(1.0f);
-							if (r < 0.15f) {
-								// 15%: go back one
-								nextStepIndex = path->currentStepIndex - 1;
-							} else if (r < 0.85f) {
-								// 70%: repeat (stay)
-								nextStepIndex = path->currentStepIndex;
-							} else {
-								// 15%: advance one
-								nextStepIndex = path->currentStepIndex + 1;
-							}
-							// Wrap circularly
-							nextStepIndex = ((nextStepIndex % totalSteps) + totalSteps) % totalSteps;
+							nextStepIndex = path->getNextJitterIndex(path->currentStepIndex, totalSteps);
 
 							// Force trigger for jitter even if the step index didn't change
 							stepChanged = true;
@@ -2233,6 +2342,40 @@ void ofApp::drawVisuals() {
 	float audioReactivePulseDraw = (energyNormDraw * audioEnergyVisualAmount.get())
 		+ (onsetPulseDraw * audioOnsetVisualAmount.get());
 
+	// Outer-scope variables needed for various drawing sections
+	float dataAlphaScale = std::clamp(dataVisualAlpha, 0.0f, 1.0f);
+
+	std::unordered_set<std::string> activePointFiles;
+	for (const auto & path : paths) {
+		for (const auto & p : path->playingPoints) {
+			activePointFiles.insert(p.filename);
+		}
+		for (const auto & g : path->gestures) {
+			for (const auto & p : g.playingPoints) {
+				activePointFiles.insert(p.filename);
+			}
+		}
+	}
+	for (const auto & p : mouseActivePoints) {
+		activePointFiles.insert(p.filename);
+	}
+
+	float extMinX = std::numeric_limits<float>::max();
+	float extMaxX = std::numeric_limits<float>::lowest();
+	float extMinY = std::numeric_limits<float>::max();
+	float extMaxY = std::numeric_limits<float>::lowest();
+	for (const auto & p : points) {
+		extMinX = std::min(extMinX, p.x);
+		extMaxX = std::max(extMaxX, p.x);
+		extMinY = std::min(extMinY, p.y);
+		extMaxY = std::max(extMaxY, p.y);
+	}
+	float pointsDiag = points.empty() ? 1.0f : ofVec2f(extMaxX - extMinX, extMaxY - extMinY).length();
+	pointsDiag = std::max(pointsDiag, 1e-6f);
+	float sizeT = std::clamp((pointSize.get() - 1.0f) / 99.0f, 0.0f, 1.0f);
+	float diagFactor = (1.0f / 1000.0f) * std::pow(1000.0f, sizeT); // log interpolation
+	float basePointRadiusWorld = pointsDiag * diagFactor;
+
 	// Draw Video Background
 	if (showVideo) {
 		if (videoDisplayMode.get() == 0) {
@@ -2547,357 +2690,330 @@ void ofApp::drawVisuals() {
 		}
 	}
 
-	ofPushMatrix();
-	ofTranslate(ofGetWidth() / 2, ofGetHeight() / 2);
-	ofTranslate(pan);
-	ofScale(zoom, zoom);
-	float dataAlphaScale = std::clamp(dataVisualAlpha, 0.0f, 1.0f);
+	if (showPointsAndPaths) {
+		ofPushMatrix();
+		ofTranslate(ofGetWidth() / 2, ofGetHeight() / 2);
+		ofTranslate(pan);
+		ofScale(zoom, zoom);
 
-	// Build active point lookup from currently playing path points.
-	std::unordered_set<std::string> activePointFiles;
-	for (const auto & path : paths) {
-		for (const auto & p : path->playingPoints) {
-			activePointFiles.insert(p.filename);
+		pointGlyphMode = (PointGlyphMode)std::clamp((int)pointGlyphMode_param.get(), 0, 7);
+		int thumbnailLoadsRemaining = thumbnailLoadsPerFrame;
+		float screenCenterX = ofGetWidth() * 0.5f;
+		float screenCenterY = ofGetHeight() * 0.5f;
+		float audioScaleBoost = 1.0f;
+		audioScaleBoost += audioReactivePulseDraw;
+
+		// Cluster labels for glyph mode 4:
+		// unclustered => 1, then clustered groups => 2,3,4... by ascending cluster_id.
+		std::unordered_set<int> seenClusterIds;
+		for (const auto & p : points) {
+			if (p.cluster_id >= 0) seenClusterIds.insert(p.cluster_id);
 		}
-	}
-	for (const auto & p : mouseActivePoints) {
-		activePointFiles.insert(p.filename);
-	}
-
-	// Point size mapping in world units based on current point-cloud extents.
-	// Required mapping: slider 1 => diag/5000, slider 100 => diag.
-	float extMinX = std::numeric_limits<float>::max();
-	float extMaxX = std::numeric_limits<float>::lowest();
-	float extMinY = std::numeric_limits<float>::max();
-	float extMaxY = std::numeric_limits<float>::lowest();
-	for (const auto & p : points) {
-		extMinX = std::min(extMinX, p.x);
-		extMaxX = std::max(extMaxX, p.x);
-		extMinY = std::min(extMinY, p.y);
-		extMaxY = std::max(extMaxY, p.y);
-	}
-	float pointsDiag = points.empty() ? 1.0f : ofVec2f(extMaxX - extMinX, extMaxY - extMinY).length();
-	pointsDiag = std::max(pointsDiag, 1e-6f);
-	float sizeT = std::clamp((pointSize.get() - 1.0f) / 99.0f, 0.0f, 1.0f);
-	float diagFactor = (1.0f / 1000.0f) * std::pow(1000.0f, sizeT); // log interpolation
-	float basePointRadiusWorld = pointsDiag * diagFactor;
-	pointGlyphMode = (PointGlyphMode)std::clamp((int)pointGlyphMode_param.get(), 0, 7);
-	int thumbnailLoadsRemaining = thumbnailLoadsPerFrame;
-	float screenCenterX = ofGetWidth() * 0.5f;
-	float screenCenterY = ofGetHeight() * 0.5f;
-	float audioScaleBoost = 1.0f;
-	audioScaleBoost += audioReactivePulseDraw;
-
-	// Cluster labels for glyph mode 4:
-	// unclustered => 1, then clustered groups => 2,3,4... by ascending cluster_id.
-	std::unordered_set<int> seenClusterIds;
-	for (const auto & p : points) {
-		if (p.cluster_id >= 0) seenClusterIds.insert(p.cluster_id);
-	}
-	std::vector<int> sortedGlyphClusterIds(seenClusterIds.begin(), seenClusterIds.end());
-	std::sort(sortedGlyphClusterIds.begin(), sortedGlyphClusterIds.end());
-	std::unordered_map<int, int> clusterGlyphLabel;
-	for (int ci = 0; ci < (int)sortedGlyphClusterIds.size(); ++ci) {
-		clusterGlyphLabel[sortedGlyphClusterIds[ci]] = ci + 2;
-	}
-
-	// Draw Points
-	ofFill(); // Ensure fill is enabled
-	ofColor c = pointColor.get();
-	float baseAlpha;
-	if (showText) {
-		baseAlpha = std::min((float)c.a, 25.0f); // cap opacity so text is readable
-	} else {
-		baseAlpha = (float)c.a;
-	}
-
-	for (int i = 0; i < (int)points.size(); ++i) {
-		const auto & p = points[i];
-		// Cluster foregrounding: dim non-active cluster points
-		float alpha = baseAlpha;
-		if (activeClusterId != -999 && p.cluster_id != activeClusterId) {
-			alpha = baseAlpha * 0.15f; // 15% of normal
+		std::vector<int> sortedGlyphClusterIds(seenClusterIds.begin(), seenClusterIds.end());
+		std::sort(sortedGlyphClusterIds.begin(), sortedGlyphClusterIds.end());
+		std::unordered_map<int, int> clusterGlyphLabel;
+		for (int ci = 0; ci < (int)sortedGlyphClusterIds.size(); ++ci) {
+			clusterGlyphLabel[sortedGlyphClusterIds[ci]] = ci + 2;
 		}
 
-		bool isHovered = hasHoveredPoint && (p.filename == hoveredPoint.filename);
-		bool isSelectedPoint = (selectedPointIdx == i) || (hasLastHoveredPoint && (p.filename == lastHoveredPoint.filename));
-		bool isAutoActive = (activePointFiles.find(p.filename) != activePointFiles.end());
-
-		ofColor drawColor = c;
-		float sizeMultiplier = 1.0f;
-		if (isAutoActive) {
-			drawColor = activePointColor.get();
-			sizeMultiplier = std::max(1.0f, selectedPointSize.get() / std::max(1.0f, pointSize.get()));
-		}
-		if (isSelectedPoint) {
-			drawColor = selectedColor.get();
-			sizeMultiplier = std::max(1.0f, selectedPointSize.get() / std::max(1.0f, pointSize.get()));
-		}
-		if (isHovered) {
-			drawColor = hoveredColor.get();
-			sizeMultiplier = std::max(1.0f, hoveredPointSize.get() / std::max(1.0f, pointSize.get()));
+		// Draw Points
+		ofFill(); // Ensure fill is enabled
+		ofColor c = pointColor.get();
+		float baseAlpha;
+		if (showText) {
+			baseAlpha = std::min((float)c.a, 25.0f); // cap opacity so text is readable
+		} else {
+			baseAlpha = (float)c.a;
 		}
 
-		ofSetColor(drawColor.r, drawColor.g, drawColor.b, (int)(alpha * dataAlphaScale));
-
-		float scale = 1.0f;
-		if (currentThirdDimMode != ThirdDimMode::NONE) {
-			float val = 0.0f;
-			switch (currentThirdDimMode) {
-			case ThirdDimMode::INSTABILITY:
-				val = p.instability;
-				break;
-			case ThirdDimMode::ATTACK:
-				val = p.attack;
-				break;
-			case ThirdDimMode::BRIGHTNESS:
-				val = p.brightness;
-				break;
-			default:
-				break;
+		for (int i = 0; i < (int)points.size(); ++i) {
+			const auto & p = points[i];
+			// Cluster foregrounding: dim non-active cluster points
+			float alpha = baseAlpha;
+			if (activeClusterId != -999 && p.cluster_id != activeClusterId) {
+				alpha = baseAlpha * 0.15f; // 15% of normal
 			}
-			scale = ofLerp(0.2f, 2.0f, val);
-		}
-		float glyphRadiusWorld = basePointRadiusWorld * scale * sizeMultiplier * audioScaleBoost;
-		PointGlyphMode drawMode = pointGlyphMode;
-		if (drawMode == PointGlyphMode::MIXED) {
-			uint32_t mixHash = stableStringHash(p.filename + "|" + p.text + "|" + ofToString(i));
-			drawMode = (PointGlyphMode)(mixHash % 6); // avoid thumbnail churn in mixed mode
-		}
 
-		switch (drawMode) {
-		case PointGlyphMode::CIRCLE:
-			ofDrawCircle(p.x, p.y, glyphRadiusWorld);
-			break;
+			bool isHovered = hasHoveredPoint && (p.filename == hoveredPoint.filename);
+			bool isSelectedPoint = (selectedPointIdx == i) || (hasLastHoveredPoint && (p.filename == lastHoveredPoint.filename));
+			bool isAutoActive = (activePointFiles.find(p.filename) != activePointFiles.end());
 
-		case PointGlyphMode::SQUARE:
-			ofDrawRectangle(p.x - glyphRadiusWorld, p.y - glyphRadiusWorld,
-				glyphRadiusWorld * 2.0f, glyphRadiusWorld * 2.0f);
-			break;
+			ofColor drawColor = c;
+			float sizeMultiplier = 1.0f;
+			if (isAutoActive) {
+				drawColor = activePointColor.get();
+				sizeMultiplier = std::max(1.0f, selectedPointSize.get() / std::max(1.0f, pointSize.get()));
+			}
+			if (isSelectedPoint) {
+				drawColor = selectedColor.get();
+				sizeMultiplier = std::max(1.0f, selectedPointSize.get() / std::max(1.0f, pointSize.get()));
+			}
+			if (isHovered) {
+				drawColor = hoveredColor.get();
+				sizeMultiplier = std::max(1.0f, hoveredPointSize.get() / std::max(1.0f, pointSize.get()));
+			}
 
-		case PointGlyphMode::X_MARK:
-			ofSetLineWidth(1.5f);
-			ofDrawLine(p.x - glyphRadiusWorld, p.y - glyphRadiusWorld,
-				p.x + glyphRadiusWorld, p.y + glyphRadiusWorld);
-			ofDrawLine(p.x - glyphRadiusWorld, p.y + glyphRadiusWorld,
-				p.x + glyphRadiusWorld, p.y - glyphRadiusWorld);
-			ofSetLineWidth(1.0f);
-			break;
+			ofSetColor(drawColor.r, drawColor.g, drawColor.b, (int)(alpha * dataAlphaScale));
 
-		case PointGlyphMode::NUMBER: {
-			uint32_t h = stableStringHash(p.filename + "|" + ofToString(i));
-			std::string label(1, (char)('0' + (h % 10)));
-			if (annotationFont.isLoaded()) {
-				ofRectangle b = annotationFont.getStringBoundingBox(label, 0.0f, 0.0f);
-				float targetH = std::max(glyphRadiusWorld * 2.1f, 1e-6f);
-				float scaleY = targetH / std::max(b.height, 1.0f);
-				ofPushMatrix();
-				ofTranslate(p.x, p.y);
-				ofScale(scaleY, scaleY);
-				annotationFont.drawString(label, -b.width * 0.5f, b.height * 0.5f);
-				ofPopMatrix();
-			} else {
+			float scale = 1.0f;
+			if (currentThirdDimMode != ThirdDimMode::NONE) {
+				float val = 0.0f;
+				switch (currentThirdDimMode) {
+				case ThirdDimMode::INSTABILITY:
+					val = p.instability;
+					break;
+				case ThirdDimMode::ATTACK:
+					val = p.attack;
+					break;
+				case ThirdDimMode::BRIGHTNESS:
+					val = p.brightness;
+					break;
+				default:
+					break;
+				}
+				scale = ofLerp(0.2f, 2.0f, val);
+			}
+			float glyphRadiusWorld = basePointRadiusWorld * scale * sizeMultiplier * audioScaleBoost;
+			PointGlyphMode drawMode = pointGlyphMode;
+			if (drawMode == PointGlyphMode::MIXED) {
+				uint32_t mixHash = stableStringHash(p.filename + "|" + p.text + "|" + ofToString(i));
+				drawMode = (PointGlyphMode)(mixHash % 6); // avoid thumbnail churn in mixed mode
+			}
+
+			switch (drawMode) {
+			case PointGlyphMode::CIRCLE:
 				ofDrawCircle(p.x, p.y, glyphRadiusWorld);
-			}
-		} break;
-
-		case PointGlyphMode::CLUSTER_NUMBER: {
-			int clusterNumber = 1;
-			auto it = clusterGlyphLabel.find(p.cluster_id);
-			if (it != clusterGlyphLabel.end()) clusterNumber = it->second;
-			std::string label = ofToString(clusterNumber);
-			if (annotationFont.isLoaded()) {
-				ofRectangle b = annotationFont.getStringBoundingBox(label, 0.0f, 0.0f);
-				float targetH = std::max(glyphRadiusWorld * 2.1f, 1e-6f);
-				float scaleY = targetH / std::max(b.height, 1.0f);
-				ofPushMatrix();
-				ofTranslate(p.x, p.y);
-				ofScale(scaleY, scaleY);
-				annotationFont.drawString(label, -b.width * 0.5f, b.height * 0.5f);
-				ofPopMatrix();
-			} else {
-				ofDrawCircle(p.x, p.y, glyphRadiusWorld);
-			}
-		} break;
-
-		case PointGlyphMode::EMOJI: {
-			uint32_t h = stableStringHash(p.filename + "|" + p.text + "|emoji");
-			int emojiIdx = (int)(h % kEmojiGlyphs.size());
-			const std::string & label = emojiGlyphLikelySupported
-				? kEmojiGlyphs[emojiIdx]
-				: kEmojiFallbackGlyphs[emojiIdx];
-			if (annotationFont.isLoaded()) {
-				ofRectangle b = annotationFont.getStringBoundingBox(label, 0.0f, 0.0f);
-				float targetH = std::max(glyphRadiusWorld * 2.1f, 1e-6f);
-				float scaleY = targetH / std::max(b.height, 1.0f);
-				ofPushMatrix();
-				ofTranslate(p.x, p.y);
-				ofScale(scaleY, scaleY);
-				annotationFont.drawString(label, -b.width * 0.5f, b.height * 0.5f);
-				ofPopMatrix();
-			} else {
-				ofDrawCircle(p.x, p.y, glyphRadiusWorld);
-			}
-		} break;
-
-		case PointGlyphMode::THUMBNAIL: {
-			float sx = p.x * zoom + pan.x + screenCenterX;
-			float sy = p.y * zoom + pan.y + screenCenterY;
-			float screenPad = std::max(32.0f, glyphRadiusWorld * zoom * 4.0f);
-			if (sx < -screenPad || sx > ofGetWidth() + screenPad || sy < -screenPad || sy > ofGetHeight() + screenPad) {
 				break;
-			}
 
-			std::string thumbPath = resolveThumbnailPathForPoint(p);
-			auto thumb = getThumbnailCached(thumbPath, thumbnailLoadsRemaining);
-			if (thumb && thumb->isAllocated() && thumb->getWidth() > 0 && thumb->getHeight() > 0) {
-				float targetH = glyphRadiusWorld * 2.4f;
-				float targetW = targetH * ((float)thumb->getWidth() / (float)thumb->getHeight());
-				targetW = std::clamp(targetW, glyphRadiusWorld * 1.4f, glyphRadiusWorld * 3.6f);
-				ofSetColor(255, 255, 255, (int)(alpha * dataAlphaScale));
-				thumb->draw(p.x - targetW * 0.5f, p.y - targetH * 0.5f, targetW, targetH);
-			} else {
-				ofNoFill();
-				ofSetLineWidth(1.0f);
+			case PointGlyphMode::SQUARE:
 				ofDrawRectangle(p.x - glyphRadiusWorld, p.y - glyphRadiusWorld,
 					glyphRadiusWorld * 2.0f, glyphRadiusWorld * 2.0f);
+				break;
+
+			case PointGlyphMode::X_MARK:
+				ofSetLineWidth(1.5f);
 				ofDrawLine(p.x - glyphRadiusWorld, p.y - glyphRadiusWorld,
 					p.x + glyphRadiusWorld, p.y + glyphRadiusWorld);
-				ofFill();
-			}
-		} break;
+				ofDrawLine(p.x - glyphRadiusWorld, p.y + glyphRadiusWorld,
+					p.x + glyphRadiusWorld, p.y - glyphRadiusWorld);
+				ofSetLineWidth(1.0f);
+				break;
 
-		case PointGlyphMode::MIXED:
-			// handled above
-			break;
-		}
-	}
-
-	// --- Neighbour Mode Highlighting ---
-	if (neighbourModeActive && selectedPointIdx >= 0 && selectedPointIdx < (int)points.size()) {
-		const DataPoint & sel = points[selectedPointIdx];
-
-		// Compute neighbour weights once: weight 1.0 = nearest, 0.0 = furthest
-		const auto & neighbours = sel.true_neighbors;
-		const auto & distances = sel.true_distances;
-		int numNeighbours = (int)std::min(neighbours.size(), distances.size());
-
-		if (numNeighbours > 0) {
-			float minDist = *std::min_element(distances.begin(), distances.begin() + numNeighbours);
-			float maxDist = *std::max_element(distances.begin(), distances.begin() + numNeighbours);
-			float distRange = std::max(maxDist - minDist, 1e-6f);
-
-			uint64_t nowMs = ofGetElapsedTimeMillis();
-			uint64_t msSincePlayed = (neighbourLastPlayedIdx >= 0)
-				? (nowMs - neighbourLastPlayedMs)
-				: kNeighbourFlashMs + 1;
-
-			ofNoFill();
-			ofSetLineWidth(1.5f);
-
-			for (int ni = 0; ni < numNeighbours; ++ni) {
-				int idx = neighbours[ni];
-				if (idx < 0 || idx >= (int)points.size()) continue;
-				const DataPoint & np = points[idx];
-
-				// Proximity weight: nearest=1.0, furthest=0.0
-				float weight = 1.0f - ((distances[ni] - minDist) / distRange);
-				weight = std::max(0.0f, std::min(1.0f, weight));
-
-				// Base alpha: 20% (dim) to 100% (nearest)
-				float baseAlpha = ofLerp(50.0f, 255.0f, weight);
-
-				// Flash: if this point was the last one played, overlay a bright flash
-				if (idx == neighbourLastPlayedIdx && msSincePlayed < kNeighbourFlashMs) {
-					float flashT = 1.0f - ((float)msSincePlayed / (float)kNeighbourFlashMs);
-					// Blend line from flash-white toward the distance-tinted colour
-					int flashAlpha = (int)(ofLerp(baseAlpha, 255.0f, flashT) * dataAlphaScale);
-					ofSetColor(255, 255, 255, flashAlpha); // bright white flash
+			case PointGlyphMode::NUMBER: {
+				uint32_t h = stableStringHash(p.filename + "|" + ofToString(i));
+				std::string label(1, (char)('0' + (h % 10)));
+				if (annotationFont.isLoaded()) {
+					ofRectangle b = annotationFont.getStringBoundingBox(label, 0.0f, 0.0f);
+					float targetH = std::max(glyphRadiusWorld * 2.1f, 1e-6f);
+					float scaleY = targetH / std::max(b.height, 1.0f);
+					ofPushMatrix();
+					ofTranslate(p.x, p.y);
+					ofScale(scaleY, scaleY);
+					annotationFont.drawString(label, -b.width * 0.5f, b.height * 0.5f);
+					ofPopMatrix();
 				} else {
-					// Normal: cool blue-white, opacity = proximity
-					ofSetColor(180, 210, 255, (int)(baseAlpha * dataAlphaScale));
+					ofDrawCircle(p.x, p.y, glyphRadiusWorld);
+				}
+			} break;
+
+			case PointGlyphMode::CLUSTER_NUMBER: {
+				int clusterNumber = 1;
+				auto it = clusterGlyphLabel.find(p.cluster_id);
+				if (it != clusterGlyphLabel.end()) clusterNumber = it->second;
+				std::string label = ofToString(clusterNumber);
+				if (annotationFont.isLoaded()) {
+					ofRectangle b = annotationFont.getStringBoundingBox(label, 0.0f, 0.0f);
+					float targetH = std::max(glyphRadiusWorld * 2.1f, 1e-6f);
+					float scaleY = targetH / std::max(b.height, 1.0f);
+					ofPushMatrix();
+					ofTranslate(p.x, p.y);
+					ofScale(scaleY, scaleY);
+					annotationFont.drawString(label, -b.width * 0.5f, b.height * 0.5f);
+					ofPopMatrix();
+				} else {
+					ofDrawCircle(p.x, p.y, glyphRadiusWorld);
+				}
+			} break;
+
+			case PointGlyphMode::EMOJI: {
+				uint32_t h = stableStringHash(p.filename + "|" + p.text + "|emoji");
+				int emojiIdx = (int)(h % kEmojiGlyphs.size());
+				const std::string & label = emojiGlyphLikelySupported
+					? kEmojiGlyphs[emojiIdx]
+					: kEmojiFallbackGlyphs[emojiIdx];
+				if (annotationFont.isLoaded()) {
+					ofRectangle b = annotationFont.getStringBoundingBox(label, 0.0f, 0.0f);
+					float targetH = std::max(glyphRadiusWorld * 2.1f, 1e-6f);
+					float scaleY = targetH / std::max(b.height, 1.0f);
+					ofPushMatrix();
+					ofTranslate(p.x, p.y);
+					ofScale(scaleY, scaleY);
+					annotationFont.drawString(label, -b.width * 0.5f, b.height * 0.5f);
+					ofPopMatrix();
+				} else {
+					ofDrawCircle(p.x, p.y, glyphRadiusWorld);
+				}
+			} break;
+
+			case PointGlyphMode::THUMBNAIL: {
+				float sx = p.x * zoom + pan.x + screenCenterX;
+				float sy = p.y * zoom + pan.y + screenCenterY;
+				float screenPad = std::max(32.0f, glyphRadiusWorld * zoom * 4.0f);
+				if (sx < -screenPad || sx > ofGetWidth() + screenPad || sy < -screenPad || sy > ofGetHeight() + screenPad) {
+					break;
 				}
 
-				ofDrawLine(sel.x, sel.y, np.x, np.y);
+				std::string thumbPath = resolveThumbnailPathForPoint(p);
+				auto thumb = getThumbnailCached(thumbPath, thumbnailLoadsRemaining);
+				if (thumb && thumb->isAllocated() && thumb->getWidth() > 0 && thumb->getHeight() > 0) {
+					float targetH = glyphRadiusWorld * 2.4f;
+					float targetW = targetH * ((float)thumb->getWidth() / (float)thumb->getHeight());
+					targetW = std::clamp(targetW, glyphRadiusWorld * 1.4f, glyphRadiusWorld * 3.6f);
+					ofSetColor(255, 255, 255, (int)(alpha * dataAlphaScale));
+					thumb->draw(p.x - targetW * 0.5f, p.y - targetH * 0.5f, targetW, targetH);
+				} else {
+					ofNoFill();
+					ofSetLineWidth(1.0f);
+					ofDrawRectangle(p.x - glyphRadiusWorld, p.y - glyphRadiusWorld,
+						glyphRadiusWorld * 2.0f, glyphRadiusWorld * 2.0f);
+					ofDrawLine(p.x - glyphRadiusWorld, p.y - glyphRadiusWorld,
+						p.x + glyphRadiusWorld, p.y + glyphRadiusWorld);
+					ofFill();
+				}
+			} break;
+
+			case PointGlyphMode::MIXED:
+				// handled above
+				break;
+			}
+		}
+
+		// --- Neighbour Mode Highlighting ---
+		if (neighbourModeActive && selectedPointIdx >= 0 && selectedPointIdx < (int)points.size()) {
+			const DataPoint & sel = points[selectedPointIdx];
+
+			// Compute neighbour weights once: weight 1.0 = nearest, 0.0 = furthest
+			const auto & neighbours = sel.true_neighbors;
+			const auto & distances = sel.true_distances;
+			int numNeighbours = (int)std::min(neighbours.size(), distances.size());
+
+			if (numNeighbours > 0) {
+				float minDist = *std::min_element(distances.begin(), distances.begin() + numNeighbours);
+				float maxDist = *std::max_element(distances.begin(), distances.begin() + numNeighbours);
+				float distRange = std::max(maxDist - minDist, 1e-6f);
+
+				uint64_t nowMs = ofGetElapsedTimeMillis();
+				uint64_t msSincePlayed = (neighbourLastPlayedIdx >= 0)
+					? (nowMs - neighbourLastPlayedMs)
+					: kNeighbourFlashMs + 1;
+
+				ofNoFill();
+				ofSetLineWidth(1.5f);
+
+				for (int ni = 0; ni < numNeighbours; ++ni) {
+					int idx = neighbours[ni];
+					if (idx < 0 || idx >= (int)points.size()) continue;
+					const DataPoint & np = points[idx];
+
+					// Proximity weight: nearest=1.0, furthest=0.0
+					float weight = 1.0f - ((distances[ni] - minDist) / distRange);
+					weight = std::max(0.0f, std::min(1.0f, weight));
+
+					// Base alpha: 20% (dim) to 100% (nearest)
+					float baseAlpha = ofLerp(50.0f, 255.0f, weight);
+
+					// Flash: if this point was the last one played, overlay a bright flash
+					if (idx == neighbourLastPlayedIdx && msSincePlayed < kNeighbourFlashMs) {
+						float flashT = 1.0f - ((float)msSincePlayed / (float)kNeighbourFlashMs);
+						// Blend line from flash-white toward the distance-tinted colour
+						int flashAlpha = (int)(ofLerp(baseAlpha, 255.0f, flashT) * dataAlphaScale);
+						ofSetColor(255, 255, 255, flashAlpha); // bright white flash
+					} else {
+						// Normal: cool blue-white, opacity = proximity
+						ofSetColor(180, 210, 255, (int)(baseAlpha * dataAlphaScale));
+					}
+
+					ofDrawLine(sel.x, sel.y, np.x, np.y);
+				}
+
+				ofFill();
+				ofSetLineWidth(1.0f);
 			}
 
+			// Draw selected point indicator: bright ring on top
+			ofSetColor(255, 255, 100, (int)(230 * dataAlphaScale)); // bright yellow
+			ofNoFill();
+			ofSetLineWidth(2.0f);
+			ofDrawCircle(sel.x, sel.y, basePointRadiusWorld * 2.5f);
 			ofFill();
 			ofSetLineWidth(1.0f);
 		}
 
-		// Draw selected point indicator: bright ring on top
-		ofSetColor(255, 255, 100, (int)(230 * dataAlphaScale)); // bright yellow
-		ofNoFill();
-		ofSetLineWidth(2.0f);
-		ofDrawCircle(sel.x, sel.y, basePointRadiusWorld * 2.5f);
-		ofFill();
-		ofSetLineWidth(1.0f);
-	}
-
-	// Draw Text
-	// Draw Paths
-	ofColor fadedPlayheadColor = playheadColor.get();
-	fadedPlayheadColor.a = (int)(fadedPlayheadColor.a * dataAlphaScale);
-	ofColor fadedPathColor = pathColor.get();
-	fadedPathColor.a = (int)(fadedPathColor.a * dataAlphaScale);
-	ofColor fadedSelectedPathColor = selectedPathColor.get();
-	fadedSelectedPathColor.a = (int)(fadedSelectedPathColor.a * dataAlphaScale);
-	float wobbleAmount = 0.0f;
-	if (audioVisualFeedbackEnabled.get()) {
-		wobbleAmount = ofClamp(audioReactivePulseDraw * audioPathWobbleAmount.get(), 0.0f, 1.0f);
-	}
-	float wobbleWorld = (9.0f / std::max(zoom, 0.001f)) * wobbleAmount;
-	float wobbleDeg = std::sin(ofGetElapsedTimef() * 2.1f) * (2.5f * wobbleAmount);
-	float wobbleX = std::sin(ofGetElapsedTimef() * 3.7f + 0.6f) * wobbleWorld;
-	float wobbleY = std::cos(ofGetElapsedTimef() * 3.1f + 1.2f) * wobbleWorld;
-
-	ofPushMatrix();
-	ofTranslate(wobbleX, wobbleY);
-	ofRotateDeg(wobbleDeg);
-	for (auto & path : paths) {
-		path->draw(playheadSize / zoom, fadedPlayheadColor, zoom, pathThickness.get(), selectedPathThickness.get(), fadedPathColor, fadedSelectedPathColor, pathLineStyle.get(), initialZoom);
-	}
-
-	// Draw current path
-	if (isDrawingPath && currentPath && currentPath->polyline.size() >= 2) {
-		ofColor currentPathColor = pathColor.get();
-		currentPathColor.a = (int)(currentPathColor.a * dataAlphaScale);
-		ofSetColor(currentPathColor);
-		float thickness = selectedPathThickness.get();
-		float safeInitialZoom = initialZoom > 0.0f ? initialZoom : 1.0f;
-		float relativeZoom = zoom / safeInitialZoom;
-		ofSetLineWidth(std::max(1.0f, thickness * relativeZoom));
-
-		int style = pathLineStyle.get();
-		if (style == 1) {
-			float perimeter = currentPath->polyline.getPerimeter();
-			float scaledDash = 10.0f / safeInitialZoom;
-			float scaledGap = 10.0f / safeInitialZoom;
-			float step = scaledDash + scaledGap;
-			for (float len = 0; len < perimeter; len += step) {
-				float endLen = std::min(len + scaledDash, perimeter);
-				ofVec2f p1 = currentPath->polyline.getPointAtLength(len);
-				ofVec2f p2 = currentPath->polyline.getPointAtLength(endLen);
-				ofDrawLine(p1.x, p1.y, p2.x, p2.y);
-			}
-		} else if (style == 2) {
-			float perimeter = currentPath->polyline.getPerimeter();
-			float scaledDotSpacing = 8.0f / safeInitialZoom;
-			float dotWorldRadius = (thickness * 0.5f) / safeInitialZoom;
-			ofPushStyle();
-			ofFill();
-			for (float len = 0; len < perimeter; len += scaledDotSpacing) {
-				ofVec2f p = currentPath->polyline.getPointAtLength(len);
-				ofDrawCircle(p.x, p.y, dotWorldRadius);
-			}
-			ofPopStyle();
-		} else {
-			currentPath->polyline.draw();
+		// Draw Text
+		// Draw Paths
+		ofColor fadedPlayheadColor = playheadColor.get();
+		fadedPlayheadColor.a = (int)(fadedPlayheadColor.a * dataAlphaScale);
+		ofColor fadedPathColor = pathColor.get();
+		fadedPathColor.a = (int)(fadedPathColor.a * dataAlphaScale);
+		ofColor fadedSelectedPathColor = selectedPathColor.get();
+		fadedSelectedPathColor.a = (int)(fadedSelectedPathColor.a * dataAlphaScale);
+		float wobbleAmount = 0.0f;
+		if (audioVisualFeedbackEnabled.get()) {
+			wobbleAmount = ofClamp(audioReactivePulseDraw * audioPathWobbleAmount.get(), 0.0f, 1.0f);
 		}
-	}
-	ofPopMatrix();
+		float wobbleWorld = (9.0f / std::max(zoom, 0.001f)) * wobbleAmount;
+		float wobbleDeg = std::sin(ofGetElapsedTimef() * 2.1f) * (2.5f * wobbleAmount);
+		float wobbleX = std::sin(ofGetElapsedTimef() * 3.7f + 0.6f) * wobbleWorld;
+		float wobbleY = std::cos(ofGetElapsedTimef() * 3.1f + 1.2f) * wobbleWorld;
 
-	ofPopMatrix();
+		ofPushMatrix();
+		ofTranslate(wobbleX, wobbleY);
+		ofRotateDeg(wobbleDeg);
+		for (auto & path : paths) {
+			path->draw(playheadSize / zoom, fadedPlayheadColor, zoom, pathThickness.get(), selectedPathThickness.get(), fadedPathColor, fadedSelectedPathColor, pathLineStyle.get(), initialZoom);
+		}
+
+		// Draw current path
+		if (isDrawingPath && currentPath && currentPath->polyline.size() >= 2) {
+			ofColor currentPathColor = pathColor.get();
+			currentPathColor.a = (int)(currentPathColor.a * dataAlphaScale);
+			ofSetColor(currentPathColor);
+			float thickness = selectedPathThickness.get();
+			float safeInitialZoom = initialZoom > 0.0f ? initialZoom : 1.0f;
+			float relativeZoom = zoom / safeInitialZoom;
+			ofSetLineWidth(std::max(1.0f, thickness * relativeZoom));
+
+			int style = pathLineStyle.get();
+			if (style == 1) {
+				float perimeter = currentPath->polyline.getPerimeter();
+				float scaledDash = 10.0f / safeInitialZoom;
+				float scaledGap = 10.0f / safeInitialZoom;
+				float step = scaledDash + scaledGap;
+				for (float len = 0; len < perimeter; len += step) {
+					float endLen = std::min(len + scaledDash, perimeter);
+					ofVec2f p1 = currentPath->polyline.getPointAtLength(len);
+					ofVec2f p2 = currentPath->polyline.getPointAtLength(endLen);
+					ofDrawLine(p1.x, p1.y, p2.x, p2.y);
+				}
+			} else if (style == 2) {
+				float perimeter = currentPath->polyline.getPerimeter();
+				float scaledDotSpacing = 8.0f / safeInitialZoom;
+				float dotWorldRadius = (thickness * 0.5f) / safeInitialZoom;
+				ofPushStyle();
+				ofFill();
+				for (float len = 0; len < perimeter; len += scaledDotSpacing) {
+					ofVec2f p = currentPath->polyline.getPointAtLength(len);
+					ofDrawCircle(p.x, p.y, dotWorldRadius);
+				}
+				ofPopStyle();
+			} else {
+				currentPath->polyline.draw();
+			}
+		}
+		ofPopMatrix();
+
+		ofPopMatrix();
+	}
 
 	// In mapped mode, draw videos above the point cloud.
 	if (showVideo && videoDisplayMode.get() == 3) {
@@ -2947,41 +3063,80 @@ void ofApp::drawVisuals() {
 		ofDrawRectangle(rectX, rectY, rectW, rectH);
 		ofPopStyle();
 
-		// Crosshair: X = position (0-1), Y = volume (0=bottom, 1=top)
-		// When ALT is held, use mouse position directly to avoid one-frame lag, clamped to the rect
-		float cx, cy;
+		// Crosshair and Gesture curves drawing
 		if (ofGetKeyPressed(OF_KEY_ALT) || inputManager.isAltDown) {
-			cx = ofClamp((float)ofGetMouseX(), rectX, rectX + rectW);
-			cy = ofClamp((float)ofGetMouseY(), rectY, rectY + rectH);
-		} else {
-			cx = rectX + selectedPath->position * rectW;
-			// Use gesture volume when a gesture is active, otherwise static volume
-			float displayVol = (selectedPath->hasGesture && !selectedPath->gesturePoints.empty())
-				? selectedPath->getGestureVolume(selectedPath->position)
-				: selectedPath->volume;
-			cy = rectY + (1.0f - displayVol) * rectH;
-		}
-		float crossSize = 10.0f;
-		ofColor phc = playheadColor.get();
-		ofSetColor(phc.r, phc.g, phc.b, (int)(128 * dataAlphaScale)); // 50% opacity
-		ofSetLineWidth(2);
-		ofDrawLine(cx - crossSize, cy, cx + crossSize, cy);
-		ofDrawLine(cx, cy - crossSize, cx, cy + crossSize);
-		ofSetLineWidth(1);
+			float cx = ofClamp((float)ofGetMouseX(), rectX, rectX + rectW);
+			float cy = ofClamp((float)ofGetMouseY(), rectY, rectY + rectH);
+			float crossSize = 10.0f;
+			ofColor phc = playheadColor.get();
+			ofSetColor(phc.r, phc.g, phc.b, (int)(128 * dataAlphaScale));
+			ofSetLineWidth(2);
+			ofDrawLine(cx - crossSize, cy, cx + crossSize, cy);
+			ofDrawLine(cx, cy - crossSize, cx, cy + crossSize);
+			ofSetLineWidth(1);
+		} else if (!selectedPath->gestures.empty()) {
+			float crossSize = 8.0f;
+			ofColor phc = playheadColor.get();
+			ofSetLineWidth(1.5f);
+			for (int gi = 0; gi < (int)selectedPath->gestures.size(); ++gi) {
+				const auto & gesture = selectedPath->gestures[gi];
+				if (gesture.points.size() < 2) continue;
+				float cx = rectX + gesture.position * rectW;
+				float cy = rectY + (1.0f - gesture.volume) * rectH;
 
-		// Gesture overlay (screen-space): draw recorded gesture as a visible curve
-		if (selectedPath->hasGesture && !selectedPath->gesturePoints.empty()) {
+				int alpha = (gi == (int)selectedPath->gestures.size() - 1) ? 180 : 80;
+				ofSetColor(phc.r, phc.g, phc.b, (int)(alpha * dataAlphaScale));
+				ofDrawLine(cx - crossSize, cy, cx + crossSize, cy);
+				ofDrawLine(cx, cy - crossSize, cx, cy + crossSize);
+			}
+			ofSetLineWidth(1);
+		} else {
+			// Draw default playhead crosshair when no gestures are active
+			float cx = rectX + selectedPath->position * rectW;
+			float cy = rectY + (1.0f - selectedPath->volume) * rectH;
+			float crossSize = 10.0f;
+			ofColor phc = playheadColor.get();
+			ofSetColor(phc.r, phc.g, phc.b, (int)(128 * dataAlphaScale));
+			ofSetLineWidth(2);
+			ofDrawLine(cx - crossSize, cy, cx + crossSize, cy);
+			ofDrawLine(cx, cy - crossSize, cx, cy + crossSize);
+			ofSetLineWidth(1);
+		}
+
+		// Gesture overlay (screen-space): draw recorded gestures as visible curves
+		if (!selectedPath->gestures.empty()) {
 			ofSetLineWidth(3);
-			for (size_t i = 0; i + 1 < selectedPath->gesturePoints.size(); ++i) {
-				const auto & a = selectedPath->gesturePoints[i];
-				const auto & b = selectedPath->gesturePoints[i + 1];
-				float x0 = rectX + a.position * rectW;
-				float y0 = rectY + (1.0f - a.volume) * rectH;
-				float x1 = rectX + b.position * rectW;
-				float y1 = rectY + (1.0f - b.volume) * rectH;
-				int alpha = (int)(((a.volume * 135) + 120) * dataAlphaScale);
-				ofSetColor(100, 255, 150, alpha);
-				ofDrawLine(x0, y0, x1, y1);
+			for (int gi = 0; gi < (int)selectedPath->gestures.size(); ++gi) {
+				const auto & gesture = selectedPath->gestures[gi];
+				if (gesture.points.size() < 2) continue;
+
+				bool isActiveRecording = isRecordingGesture && (gi == (int)selectedPath->gestures.size() - 1);
+
+				ofColor colorCurve;
+				if (isActiveRecording) {
+					colorCurve = ofColor(100, 255, 200); // Bright green-cyan during recording
+				} else if (gi == (int)selectedPath->gestures.size() - 1) {
+					colorCurve = ofColor(100, 255, 150); // Bright green (most recent)
+				} else {
+					colorCurve = ofColor(100, 200, 255); // Faded blue-green (older gestures)
+				}
+
+				for (size_t i = 0; i + 1 < gesture.points.size(); ++i) {
+					const auto & a = gesture.points[i];
+					const auto & b = gesture.points[i + 1];
+					float x0 = rectX + a.position * rectW;
+					float y0 = rectY + (1.0f - a.volume) * rectH;
+					float x1 = rectX + b.position * rectW;
+					float y1 = rectY + (1.0f - b.volume) * rectH;
+
+					int alpha = (int)(((a.volume * 135) + 120) * dataAlphaScale);
+					if (gi != (int)selectedPath->gestures.size() - 1) {
+						alpha = (int)(alpha * 0.4f); // fade older ones
+					}
+
+					ofSetColor(colorCurve.r, colorCurve.g, colorCurve.b, alpha);
+					ofDrawLine(x0, y0, x1, y1);
+				}
 			}
 			ofSetLineWidth(1);
 		}
@@ -2989,7 +3144,6 @@ void ofApp::drawVisuals() {
 
 	// Draw Text (Screen Space)
 	if (showText) {
-		float safeInitialZoom = initialZoom > 0.0f ? initialZoom : 1.0f;
 		float textHeightWorld = basePointRadiusWorld * fontSize.get() * 0.24f;
 
 		if (font.isLoaded()) {
@@ -3073,38 +3227,113 @@ void ofApp::drawVisuals() {
 		}
 	}
 
-	// Draw Title (Screen Space)
-	if (showTitle && !compositionTitle.empty()) {
-		ofSetColor(titleColor);
-		if (titleFont.isLoaded()) {
-			// Update font size if changed
-			static float lastTitleFontSize = titleFontSize;
-			if (abs(lastTitleFontSize - titleFontSize) > 0.5f) {
-				bool result = titleFont.load("lmroman10-bold.otf", titleFontSize);
-				if (!result) titleFont.load(OF_TTF_SANS, titleFontSize);
-				lastTitleFontSize = titleFontSize;
+	// Draw Title or Playing Sample Texts (Screen Space)
+	if (showTitle) {
+		if (showText) {
+			// Gather unique text from playing audio samples
+			std::vector<std::string> activeTexts;
+			std::unordered_set<std::string> seenTexts;
+			for (const auto & path : paths) {
+				for (const auto & p : path->playingPoints) {
+					if (!p.text.empty() && seenTexts.find(p.text) == seenTexts.end()) {
+						activeTexts.push_back(p.text);
+						seenTexts.insert(p.text);
+					}
+				}
+				for (const auto & g : path->gestures) {
+					for (const auto & p : g.playingPoints) {
+						if (!p.text.empty() && seenTexts.find(p.text) == seenTexts.end()) {
+							activeTexts.push_back(p.text);
+							seenTexts.insert(p.text);
+						}
+					}
+				}
+			}
+			for (const auto & p : mouseActivePoints) {
+				if (!p.text.empty() && seenTexts.find(p.text) == seenTexts.end()) {
+					activeTexts.push_back(p.text);
+					seenTexts.insert(p.text);
+				}
 			}
 
-			ofRectangle bounds = titleFont.getStringBoundingBox(compositionTitle, 0, 0);
-			float x = (ofGetWidth() - bounds.width) / 2.0f;
-			float y = (ofGetHeight() - bounds.height) / 2.0f + bounds.height;
+			if (!activeTexts.empty()) {
+				ofSetColor(titleColor);
+				if (titleFont.isLoaded()) {
+					// Update font size if changed
+					static float lastTitleFontSize = titleFontSize;
+					if (abs(lastTitleFontSize - titleFontSize) > 0.5f) {
+						bool result = titleFont.load("lmroman10-bold.otf", titleFontSize);
+						if (!result) titleFont.load(OF_TTF_SANS, titleFontSize);
+						lastTitleFontSize = titleFontSize;
+					}
 
-			// Optional drop shadow
-			ofSetColor(0, 0, 0, 150);
-			titleFont.drawString(compositionTitle, x + 2, y + 2);
+					float fontLineH = titleFont.getLineHeight();
+					float totalH = activeTexts.size() * fontLineH;
+					float startY = (ofGetHeight() - totalH) / 2.0f + fontLineH * 0.75f;
+
+					for (size_t i = 0; i < activeTexts.size(); ++i) {
+						ofRectangle bounds = titleFont.getStringBoundingBox(activeTexts[i], 0, 0);
+						float x = (ofGetWidth() - bounds.width) / 2.0f;
+						float y = startY + i * fontLineH;
+
+						// Optional drop shadow
+						ofSetColor(0, 0, 0, 150);
+						titleFont.drawString(activeTexts[i], x + 2, y + 2);
+						ofSetColor(titleColor);
+
+						titleFont.drawString(activeTexts[i], x, y);
+					}
+				} else {
+					float lineH = 18.0f;
+					float totalH = activeTexts.size() * lineH;
+					float startY = (ofGetHeight() - totalH) / 2.0f;
+
+					for (size_t i = 0; i < activeTexts.size(); ++i) {
+						float strWidth = activeTexts[i].length() * 8.0f;
+						float x = (ofGetWidth() - strWidth) / 2.0f;
+						float y = startY + i * lineH;
+
+						ofSetColor(0, 0, 0, 150);
+						ofDrawBitmapString(activeTexts[i], x + 2, y + 2);
+						ofSetColor(titleColor);
+
+						ofDrawBitmapString(activeTexts[i], x, y);
+					}
+				}
+			}
+		} else if (!compositionTitle.empty()) {
+			// Draw Composition Title
 			ofSetColor(titleColor);
+			if (titleFont.isLoaded()) {
+				// Update font size if changed
+				static float lastTitleFontSize = titleFontSize;
+				if (abs(lastTitleFontSize - titleFontSize) > 0.5f) {
+					bool result = titleFont.load("lmroman10-bold.otf", titleFontSize);
+					if (!result) titleFont.load(OF_TTF_SANS, titleFontSize);
+					lastTitleFontSize = titleFontSize;
+				}
 
-			titleFont.drawString(compositionTitle, x, y);
-		} else {
-			float strWidth = compositionTitle.length() * 8.0f;
-			float x = (ofGetWidth() - strWidth) / 2.0f;
-			float y = ofGetHeight() / 2.0f;
+				ofRectangle bounds = titleFont.getStringBoundingBox(compositionTitle, 0, 0);
+				float x = (ofGetWidth() - bounds.width) / 2.0f;
+				float y = (ofGetHeight() - bounds.height) / 2.0f + bounds.height;
 
-			ofSetColor(0, 0, 0, 150);
-			ofDrawBitmapString(compositionTitle, x + 2, y + 2);
-			ofSetColor(titleColor);
+				// Optional drop shadow
+				ofSetColor(0, 0, 0, 150);
+				titleFont.drawString(compositionTitle, x + 2, y + 2);
+				ofSetColor(titleColor);
 
-			ofDrawBitmapString(compositionTitle, x, y);
+				titleFont.drawString(compositionTitle, x, y);
+			} else {
+				float strWidth = compositionTitle.length() * 8.0f;
+				float x = (ofGetWidth() - strWidth) / 2.0f;
+				float y = ofGetHeight() / 2.0f;
+
+				ofSetColor(0, 0, 0, 150);
+				ofDrawBitmapString(compositionTitle, x + 2, y + 2);
+				ofSetColor(titleColor);
+
+				ofDrawBitmapString(compositionTitle, x, y);
+			}
 		}
 	}
 
@@ -3249,7 +3478,11 @@ void ofApp::drawVisuals() {
 	if (!minimalStatus) {
 		int textY = 320;
 		if (selectedPath) {
-			ofDrawBitmapString("Selected: " + selectedPath->name + " - Video: " + (selectedPath->sendToVideo ? "ON" : "OFF"), 20, textY);
+			std::string stepModeStr = "OFF";
+			if (selectedPath->stepMode) {
+				stepModeStr = selectedPath->stepModeAudioDuration ? "ON (Audio Dur)" : "ON (Fixed Time)";
+			}
+			ofDrawBitmapString("Selected: " + selectedPath->name + " - Video: " + (selectedPath->sendToVideo ? "ON" : "OFF") + " - StepMode: " + stepModeStr, 20, textY);
 			textY += 20;
 			ofDrawBitmapString("  Rest Duration ({/}): " + ofToString(selectedPath->restDuration, 2) + "s", 20, textY);
 			textY += 20;
@@ -3355,7 +3588,9 @@ void ofApp::drawVisuals() {
 		ly += lineH;
 		ofDrawBitmapString("  q     Create sequential path (all points)", lx, ly);
 		ly += lineH;
-		ofDrawBitmapString("  e     Toggle step mode (timer-driven steps)", lx, ly);
+		ofDrawBitmapString("  e     Toggle step mode (fixed time steps)", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  E     Toggle step mode (audio-duration steps)", lx, ly);
 		ly += lineH;
 		ofDrawBitmapString("  Up/Dn Adjust speed", lx, ly);
 		ly += lineH;
@@ -3371,7 +3606,7 @@ void ofApp::drawVisuals() {
 		ly += lineH;
 		ofDrawBitmapString("  q     Create Sequential path from points", lx, ly);
 		ly += lineH;
-		ofDrawBitmapString("  e     Toggle step mode (Sequential paths)", lx, ly);
+		ofDrawBitmapString("  e/E   Toggle step mode (Sequential paths)", lx, ly);
 		ly += lineH;
 		ofDrawBitmapString("  j     Toggle jitter mode (probabilistic advance)", lx, ly);
 		ly += lineH;
@@ -3418,6 +3653,8 @@ void ofApp::drawVisuals() {
 		ofDrawBitmapString("  t       Toggle text labels", lx, ly);
 		ly += lineH;
 		ofDrawBitmapString("  a       Fade points and paths in/out", lx, ly);
+		ly += lineH;
+		ofDrawBitmapString("  A       Hide/Show all points and paths (toggle visibility)", lx, ly);
 		ly += lineH;
 		ofDrawBitmapString("  d     Toggle debug info", lx, ly);
 		ly += lineH;
@@ -3840,6 +4077,10 @@ void ofApp::keyPressed(int key) {
 		targetDataVisualAlpha = (targetDataVisualAlpha > 0.5f) ? 0.0f : 1.0f;
 		break;
 
+	case CMD_TOGGLE_POINTS_AND_PATHS_VISIBILITY:
+		showPointsAndPaths = !showPointsAndPaths;
+		break;
+
 	case CMD_TOGGLE_PINGPONG:
 		if (selectedPath) {
 			selectedPath->isPingPong = !selectedPath->isPingPong;
@@ -4128,7 +4369,7 @@ void ofApp::keyPressed(int key) {
 		newPath->name = "seq-" + ofToString(newPath->id);
 		newPath->mode = defaultPathMode;
 		newPath->isSequential = true;
-		newPath->radius = 1.0f; // Minimal radius as we use step logic
+		//newPath->radius = 1.0f; // Minimal radius as we use step logic
 
 		// Sort point pointers
 		std::vector<const DataPoint *> sortedPtrs;
@@ -4193,17 +4434,52 @@ void ofApp::keyPressed(int key) {
 
 	case CMD_CLEAR_GESTURE:
 		if (selectedPath) {
-			selectedPath->clearGesture();
-			ofLogNotice("ofApp") << "Gesture cleared.";
+			if (!selectedPath->gestures.empty()) {
+				int idx = (int)selectedPath->gestures.size() - 1;
+				std::string voiceName = selectedPath->name + "-g" + ofToString(idx);
+				for (const auto & p : selectedPath->gestures.back().playingPoints) {
+					oscManager.stopSample(mediaRoot + p.filename, voiceName);
+				}
+				selectedPath->gestures.pop_back();
+				selectedPath->hasGesture = !selectedPath->gestures.empty();
+				ofLogNotice("ofApp") << "Last gesture removed. Remaining: " << selectedPath->gestures.size();
+			} else {
+				ofLogNotice("ofApp") << "No gestures to clear.";
+			}
 		}
 		break;
 
 	case CMD_TOGGLE_STEP_MODE:
 		if (selectedPath && selectedPath->isSequential) {
-			selectedPath->stepMode = !selectedPath->stepMode;
-			selectedPath->stepTimer = 0.0f;
-			if (selectedPath->stepMode) selectedPath->currentStepIndex = 0;
-			ofLogNotice("ofApp") << "Step mode: " << (selectedPath->stepMode ? "ON" : "OFF");
+			if (selectedPath->stepMode && selectedPath->stepModeAudioDuration) {
+				selectedPath->stepModeAudioDuration = false;
+				ofLogNotice("ofApp") << "Step mode: ON (Fixed Time)";
+			} else {
+				selectedPath->stepMode = !selectedPath->stepMode;
+				selectedPath->stepModeAudioDuration = false;
+				selectedPath->stepTimer = 0.0f;
+				if (selectedPath->stepMode) selectedPath->currentStepIndex = 0;
+				ofLogNotice("ofApp") << "Step mode: " << (selectedPath->stepMode ? "ON (Fixed Time)" : "OFF");
+			}
+		}
+		break;
+
+	case CMD_TOGGLE_AUDIO_DURATION_STEP_MODE:
+		if (selectedPath && selectedPath->isSequential) {
+			if (selectedPath->stepMode && !selectedPath->stepModeAudioDuration) {
+				selectedPath->stepModeAudioDuration = true;
+				resolvePathAudioDurations(selectedPath);
+				ofLogNotice("ofApp") << "Step mode: ON (Audio Dur)";
+			} else {
+				selectedPath->stepMode = !selectedPath->stepMode;
+				selectedPath->stepModeAudioDuration = selectedPath->stepMode;
+				selectedPath->stepTimer = 0.0f;
+				if (selectedPath->stepMode) {
+					selectedPath->currentStepIndex = 0;
+					resolvePathAudioDurations(selectedPath);
+				}
+				ofLogNotice("ofApp") << "Step mode: " << (selectedPath->stepMode ? "ON (Audio Dur)" : "OFF");
+			}
 		}
 		break;
 
@@ -4411,10 +4687,22 @@ void ofApp::mousePressed(int x, int y, int button) {
 		float rectY = (float)ofGetHeight() - rectH - rectOffset;
 
 		if ((float)x >= rectX && (float)x <= rectX + rectW && (float)y >= rectY && (float)y <= rectY + rectH) {
-			selectedPath->gesturePoints.clear();
-			selectedPath->hasGesture = false;
-			selectedPath->gestureStartTime = ofGetElapsedTimeMillis();
-			isRecordingGesture = true;
+			if (selectedPath->gestures.size() < 5) {
+				float scrubPos = std::clamp(((float)x - rectX) / rectW, 0.0f, 1.0f);
+				float vol = std::clamp(ofMap((float)y, rectY + rectH, rectY, 0.f, 1.f), 0.f, 1.f);
+
+				PathObject::GestureInstance newG;
+				newG.points.push_back({ scrubPos, vol, 0 });
+				newG.playbackTime = 0.0f;
+				newG.position = scrubPos;
+				newG.volume = vol;
+
+				selectedPath->gestures.push_back(newG);
+				selectedPath->gestureStartTime = ofGetElapsedTimeMillis();
+				isRecordingGesture = true;
+			} else {
+				ofLogWarning("ofApp") << "Max gesture limit of 5 reached for this path.";
+			}
 			return;
 		}
 	}
@@ -4614,8 +4902,12 @@ void ofApp::mouseDragged(int x, int y, int button) {
 		float scrubPos = std::clamp(((float)x - rectX) / rectW, 0.0f, 1.0f);
 		float vol = std::clamp(ofMap((float)y, rectY + rectH, rectY, 0.f, 1.f), 0.f, 1.f);
 		long timeMs = ofGetElapsedTimeMillis() - selectedPath->gestureStartTime;
-		selectedPath->gesturePoints.push_back({ scrubPos, vol, timeMs });
-		selectedPath->position = scrubPos; // live preview during record
+
+		if (!selectedPath->gestures.empty()) {
+			selectedPath->gestures.back().points.push_back({ scrubPos, vol, timeMs });
+			selectedPath->gestures.back().position = scrubPos; // live preview during record
+			selectedPath->gestures.back().volume = vol;
+		}
 		return;
 	}
 	// Reshaping control point in BROWSE mode
@@ -4707,9 +4999,18 @@ void ofApp::mouseReleased(int x, int y, int button) {
 
 	// Commit gesture recording if active
 	if (isRecordingGesture && selectedPath) {
-		selectedPath->hasGesture = !selectedPath->gesturePoints.empty();
-		if (selectedPath->hasGesture)
-			ofLogNotice("ofApp") << "Gesture recorded: " << selectedPath->gesturePoints.size() << " points.";
+		if (!selectedPath->gestures.empty()) {
+			auto & lastG = selectedPath->gestures.back();
+			if (lastG.points.size() < 2) {
+				// Discard empty/invalid gesture
+				selectedPath->gestures.pop_back();
+			} else {
+				selectedPath->hasGesture = true;
+				ofLogNotice("ofApp") << "Gesture recorded: " << lastG.points.size()
+									 << " points. Total gestures: " << selectedPath->gestures.size();
+			}
+		}
+		selectedPath->hasGesture = !selectedPath->gestures.empty();
 		isRecordingGesture = false;
 		return;
 	}
@@ -4996,6 +5297,74 @@ void ofApp::zoomToDataExtents(bool animate, bool includeAnnotations) {
 	} else {
 		initialZoom = 1.0f;
 		setViewTarget(1.0f, ofVec2f(0, 0), animate);
+	}
+}
+
+//--------------------------------------------------------------
+float ofApp::getWavDuration(const std::string & filepath) {
+	std::ifstream file(filepath, std::ios::binary);
+	if (!file.is_open()) return -1.0f;
+
+	char header[12];
+	if (!file.read(header, 12)) return -1.0f;
+
+	// Verify standard RIFF/WAVE header
+	if (std::strncmp(header, "RIFF", 4) != 0 || std::strncmp(header + 8, "WAVE", 4) != 0) {
+		return -1.0f;
+	}
+
+	uint32_t byteRate = 0;
+	uint32_t dataSize = 0;
+	char chunkId[4];
+	uint32_t chunkSize = 0;
+
+	// Scan chunks sequentially
+	while (file.read(chunkId, 4) && file.read(reinterpret_cast<char *>(&chunkSize), 4)) {
+		if (std::strncmp(chunkId, "fmt ", 4) == 0) {
+			uint16_t audioFormat = 0;
+			uint16_t numChannels = 0;
+			uint32_t sampleRate = 0;
+			uint32_t internalByteRate = 0;
+
+			if (file.read(reinterpret_cast<char *>(&audioFormat), 2) && file.read(reinterpret_cast<char *>(&numChannels), 2) && file.read(reinterpret_cast<char *>(&sampleRate), 4) && file.read(reinterpret_cast<char *>(&internalByteRate), 4)) {
+				byteRate = internalByteRate;
+
+				// Skip remaining format bytes if format chunk is larger than 12 bytes
+				if (chunkSize > 12) file.seekg(chunkSize - 12, std::ios::cur);
+			} else {
+				return -1.0f;
+			}
+		} else if (std::strncmp(chunkId, "data", 4) == 0) {
+			dataSize = chunkSize;
+			break; // Found the audio data size, we can stop reading
+		} else {
+			// Skip other metadata/list chunks
+			file.seekg(chunkSize, std::ios::cur);
+		}
+	}
+
+	if (byteRate > 0 && dataSize > 0) {
+		return (float)dataSize / (float)byteRate;
+	}
+	return -1.0f;
+}
+
+//--------------------------------------------------------------
+void ofApp::resolvePathAudioDurations(std::shared_ptr<PathObject> path) {
+	if (!path || !path->isSequential) return;
+	for (auto & dp : path->sequentialPoints) {
+		if (dp.duration < 0.0f) {
+			float dur = getWavDuration(mediaRoot + dp.filename);
+			dp.duration = (dur > 0.0f) ? dur : 1.0f;
+
+			// Sync back to master points list
+			for (auto & p : points) {
+				if (p.filename == dp.filename) {
+					p.duration = dp.duration;
+					break;
+				}
+			}
+		}
 	}
 }
 
@@ -5446,6 +5815,14 @@ void ofApp::stopPathSamples(std::shared_ptr<PathObject> p) {
 		oscManager.stopSample(mediaRoot + dp.filename, p->name);
 	}
 	p->playingPoints.clear();
+
+	for (int gi = 0; gi < (int)p->gestures.size(); ++gi) {
+		std::string voiceName = p->name + "-g" + ofToString(gi);
+		for (const auto & dp : p->gestures[gi].playingPoints) {
+			oscManager.stopSample(mediaRoot + dp.filename, voiceName);
+		}
+		p->gestures[gi].playingPoints.clear();
+	}
 }
 
 //--------------------------------------------------------------
@@ -5515,18 +5892,39 @@ void ofApp::saveComposition(string filepath) {
 			pathJson["attached_points"] = attachedArray;
 		}
 
-		// Save gesture points if applicable
-		if (p->hasGesture && !p->gesturePoints.empty()) {
+		// Save gesture points (for legacy compatibility and multi-gesture support)
+		if (!p->gestures.empty()) {
 			pathJson["has_gesture"] = true;
+
+			// 1. Legacy save of first gesture
 			ofxJSONElement gArray;
-			for (int j = 0; j < p->gesturePoints.size(); ++j) {
+			const auto & firstG = p->gestures.front();
+			for (size_t j = 0; j < firstG.points.size(); ++j) {
 				ofxJSONElement g;
-				g["position"] = p->gesturePoints[j].position;
-				g["volume"] = p->gesturePoints[j].volume;
-				g["timeMs"] = (Json::Int64)p->gesturePoints[j].timeMs;
+				g["position"] = firstG.points[j].position;
+				g["volume"] = firstG.points[j].volume;
+				g["timeMs"] = (Json::Int64)firstG.points[j].timeMs;
 				gArray.append(g);
 			}
 			pathJson["gesture_points"] = gArray;
+
+			// 2. Multi-gesture array save
+			ofxJSONElement allGesturesArray;
+			for (int gi = 0; gi < (int)p->gestures.size(); ++gi) {
+				const auto & gesture = p->gestures[gi];
+				ofxJSONElement gestObj;
+				ofxJSONElement ptsArray;
+				for (size_t j = 0; j < gesture.points.size(); ++j) {
+					ofxJSONElement pt;
+					pt["position"] = gesture.points[j].position;
+					pt["volume"] = gesture.points[j].volume;
+					pt["timeMs"] = (Json::Int64)gesture.points[j].timeMs;
+					ptsArray.append(pt);
+				}
+				gestObj["points"] = ptsArray;
+				allGesturesArray.append(gestObj);
+			}
+			pathJson["gestures"] = allGesturesArray;
 		} else {
 			pathJson["has_gesture"] = false;
 		}
@@ -5698,21 +6096,52 @@ void ofApp::loadCompositionOrPoints(string filepath) {
 				}
 
 				// Reconstruct gesture points (if applicable)
-				if (pJson.isMember("has_gesture") && pJson["has_gesture"].asBool()) {
+				if (pJson.isMember("gestures") && pJson["gestures"].isArray()) {
+					newPath->hasGesture = true;
+					const ofxJSONElement & gesturesArr = pJson["gestures"];
+					for (int gi = 0; gi < gesturesArr.size(); ++gi) {
+						if (gesturesArr[gi].isMember("points") && gesturesArr[gi]["points"].isArray()) {
+							PathObject::GestureInstance gInst;
+							const ofxJSONElement & ptsArray = gesturesArr[gi]["points"];
+							for (int j = 0; j < ptsArray.size(); ++j) {
+								PathObject::GesturePoint gp;
+								gp.position = ptsArray[j]["position"].asFloat();
+								gp.volume = ptsArray[j]["volume"].asFloat();
+								gp.timeMs = ptsArray[j].isMember("timeMs") ? ptsArray[j]["timeMs"].asInt64() : 0;
+								gInst.points.push_back(gp);
+							}
+							if (gInst.points.size() >= 2) {
+								gInst.playbackTime = 0.0f;
+								gInst.position = gInst.points.front().position;
+								gInst.volume = gInst.points.front().volume;
+								newPath->gestures.push_back(gInst);
+							}
+						}
+					}
+				} else if (pJson.isMember("has_gesture") && pJson["has_gesture"].asBool()) {
 					if (pJson.isMember("gesture_points") && pJson["gesture_points"].isArray()) {
 						newPath->hasGesture = true;
+						PathObject::GestureInstance gInst;
 						const ofxJSONElement & gArray = pJson["gesture_points"];
 						for (int j = 0; j < gArray.size(); ++j) {
 							PathObject::GesturePoint gp;
 							gp.position = gArray[j]["position"].asFloat();
 							gp.volume = gArray[j]["volume"].asFloat();
-							// Default timeMs to 0 for older un-versioned saves to avoid crash, but they won't playback dynamically
 							gp.timeMs = gArray[j].isMember("timeMs") ? gArray[j]["timeMs"].asInt64() : 0;
-							newPath->gesturePoints.push_back(gp);
+							gInst.points.push_back(gp);
+						}
+						if (gInst.points.size() >= 2) {
+							gInst.playbackTime = 0.0f;
+							gInst.position = gInst.points.front().position;
+							gInst.volume = gInst.points.front().volume;
+							newPath->gestures.push_back(gInst);
 						}
 					}
 				}
 
+				if (newPath->isSequential) {
+					resolvePathAudioDurations(newPath);
+				}
 				paths.push_back(newPath);
 				oscManager.sendUIPathAdd(newPath->name);
 				sendFullUIUpdate(newPath);
@@ -5933,7 +6362,7 @@ void ofApp::spreadPointsApart() {
 					}
 				} else {
 					// Circular overlap resolution
-					float dist = std::sqrt(dx*dx + dy*dy);
+					float dist = std::sqrt(dx * dx + dy * dy);
 					float minDist = (sizes[i].x + sizes[j].x) * 0.5f;
 					if (dist < minDist) {
 						float overlap = minDist - dist;

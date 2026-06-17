@@ -30,13 +30,5 @@ bool openJsonFileDialogAsync(const std::function<void(const std::string &)> & on
 	}
 
 	return true;
-}
-
-#else
-
-bool openJsonFileDialogAsync(const std::function<void(const std::string &)> & onComplete) {
-	onComplete(std::string());
-	return false;
-}
-
 #endif
+

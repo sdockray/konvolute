@@ -13,5 +13,6 @@ build/*
 
 # MediaPipe helper build artifacts
 .venv-mediapipe-helper/
+tools/
 tools/build/
 tools/dist/

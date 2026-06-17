@@ -45,4 +45,39 @@
 	<Audio_Video_FX_Amount>0.275</Audio_Video_FX_Amount>
 	<Audio_Path_Wobble>0</Audio_Path_Wobble>
 	<Mosaic_Replace_Ratio>0.955</Mosaic_Replace_Ratio>
+	<UI>
+		<Minimal_Status_Overlay>1</Minimal_Status_Overlay>
+	</UI>
+	<Colors>
+		<Background>20, 25, 40, 255</Background>
+		<Point_Color>100, 150, 255, 255</Point_Color>
+		<Selected_Color>255, 100, 100, 255</Selected_Color>
+		<Hovered_Color>255, 255, 100, 255</Hovered_Color>
+		<Path_Color>255, 0, 144, 255</Path_Color>
+		<Active_Path_Color>255, 255, 0, 43</Active_Path_Color>
+		<Active_Point_Color>255, 145, 21, 255</Active_Point_Color>
+		<Text_Color>255, 255, 255, 255</Text_Color>
+		<Active_Text_Color>0, 255, 0, 255</Active_Text_Color>
+		<Title_Color>255, 255, 255, 255</Title_Color>
+		<Debug_Text_Color>255, 255, 255, 255</Debug_Text_Color>
+		<Grid_Color>120, 140, 170, 70</Grid_Color>
+		<Playhead_Color>255, 255, 255, 255</Playhead_Color>
+	</Colors>
+	<Video>
+		<Mosaic_Replace_Ratio>0.75</Mosaic_Replace_Ratio>
+		<Video_Fade_Speed>15</Video_Fade_Speed>
+		<Image_Index>0</Image_Index>
+	</Video>
+	<Spectrogram>
+		<Spectrogram_Alpha>0.78</Spectrogram_Alpha>
+		<Spectrogram_Trail_Alpha>0.35</Spectrogram_Trail_Alpha>
+		<Spectrogram_Trail_Length>4</Spectrogram_Trail_Length>
+		<Spectrogram_Luma_Key>0.08</Spectrogram_Luma_Key>
+	</Spectrogram>
+	<Audio_Reactive>
+		<Audio_Visual_Feedback>1</Audio_Visual_Feedback>
+		<Audio_Energy_Amount>0.0612245</Audio_Energy_Amount>
+		<Audio_Onset_Amount>0.0459184</Audio_Onset_Amount>
+		<Audio_Path_Wobble>0.0561224</Audio_Path_Wobble>
+	</Audio_Reactive>
 </Visual_Settings>

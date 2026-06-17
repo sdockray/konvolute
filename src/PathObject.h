@@ -63,7 +63,10 @@ public:
 	bool jitterMode; // Probabilistic step advance
 	int lastJitterStepFloor; // Position floor from last frame (detects step boundary crossings)
 	bool stepMode; // Timer-driven step index (not derived from polyline position)
+	bool stepModeAudioDuration; // Step duration matches current point's audio file length
 	float stepTimer; // 0-1 accumulator for step mode advancement
+	bool stepTriggered; // true for one frame when step mode timer triggers
+
 
 	// Gesture Recording
 	struct GesturePoint {
@@ -71,10 +74,21 @@ public:
 		float volume;
 		long timeMs; // elapsed time since gesture start
 	}; // position 0-1, volume 0-1
+
+	struct GestureInstance {
+		std::vector<GesturePoint> points;
+		float playbackTime = 0.0f;
+		float position = 0.0f;
+		float volume = 0.0f;
+		std::unordered_set<DataPoint> playingPoints;
+		float restTimer = 0.0f;
+	};
+
 	bool hasGesture;
 	long gestureStartTime;
 	float gesturePlaybackTime;
 	std::vector<GesturePoint> gesturePoints;
+	std::vector<GestureInstance> gestures;
 
 	// Video Triggering
 	bool sendToVideo = true;
@@ -129,6 +143,7 @@ public:
 	ofVec2f getCurrentPosition() const;
 	float getDistanceToPoint(ofVec2f pt) const;
 	void moveRelative(ofVec2f delta);
+	int getNextJitterIndex(int currentIndex, int totalSteps);
 
 	// Spatial Query
 	std::vector<DataPoint>

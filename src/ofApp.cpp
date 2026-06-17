@@ -14,6 +14,8 @@
 #include <io.h>
 #define X_OK 0
 #define access _access
+#define popen _popen
+#define pclose _pclose
 #endif
 
 static uint32_t stableStringHash(const std::string & s) {
@@ -5720,7 +5722,7 @@ void ofApp::triggerVideo(const DataPoint & p) {
 		}
 
 		ofFile vFile(videoPath);
-		string currentPath = videoFront->isLoaded() ? videoFront->getMoviePath() : "";
+		string currentPath = videoFront->isLoaded() ? videoFront->getMoviePath().string() : "";
 		if (vFile.exists() && currentPath != videoPath) {
 			if (videoDisplayMode.get() == 0) {
 				// Swap: old front keeps running as back — no reload, no flash
